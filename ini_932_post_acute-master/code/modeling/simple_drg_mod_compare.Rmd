@@ -1,0 +1,378 @@
+---
+title: "Comparing Logistic Models"
+output:
+  html_notebook:
+    code_folding: hide
+    df_print: paged
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_depth: 5
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+  pdf_document:
+    toc: yes
+    toc_depth: '5'
+---
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(modelr)
+library(devtools)
+load_all("~/savvyR")
+```
+
+```{r preprocessing}
+load(file = '~/bkt_inv_post_acute/glm_data_preprocessed.RData')
+source('~/plot_glm_coef.R')
+
+#----- model fitting stpes -----#
+# drop drgs with less than 0.2% non-zero
+drg_props<- 
+  response_drg  %>%
+  select(starts_with("drg")) %>%
+  summarise(across(.fns = mean)) %>%
+  unlist() 
+
+top_drgs <- which(drg_props > 0.002) %>% names()
+
+# subset df to those drgs
+final_df <-
+  response_drg %>%
+  mutate(age_group = cut(age_at_admit, c(0, 65, 70, 75, 80, 85, 120))) %>%
+  select(
+    savvy_pid, readmit_30_flag, age_group, gender, ip_days, 
+    one_of(top_drgs)
+  ) %>% mutate(
+    ip_bin_1plus = ifelse(ip_days > 1, 1,0),
+    ip_bin_3plus = ifelse(ip_days > 3, 1,0),
+    ip_bin_5plus = ifelse(ip_days > 5, 1,0),
+    ip_bin_7plus = ifelse(ip_days > 7, 1,0),
+    ip_bin_14plus = ifelse(ip_days > 14, 1,0)
+  )
+
+final_df <- within(final_df, age_group <- relevel(age_group, "(65,70]"))
+
+# split data into train and test
+set.seed(1085)
+trainIndex <- createDataPartition(final_df$readmit_30_flag, p=0.8, 
+                                  list = FALSE, times = 1)
+train_df <- final_df[trainIndex,]
+test_df <- final_df[-trainIndex,]
+```
+
+## Inspecting Length of Admissions
+
+```{r}
+summary(final_df$ip_days)
+
+cat('Total number of members:', n_distinct(final_df$savvy_pid),
+'\nNumber of members with 14 days or less length of stay:', length(which(final_df$ip_days <= 14)),
+'\nNumber of members with more than 14 days length of stay:', length(which(final_df$ip_days > 14)))
+
+cat('TRAIN DATA:',
+'\nTotal number of members:', n_distinct(train_df$savvy_pid),
+'\nNumber of members with 14 days or less length of stay:', length(which(train_df$ip_days <= 14)),
+'\nNumber of members with more than 14 days length of stay:', length(which(train_df$ip_days > 14)))
+
+cat('TEST DATA:',
+'\nTotal number of members:', n_distinct(test_df$savvy_pid),
+'\nNumber of members with 14 days or less length of stay:', length(which(test_df$ip_days <= 14)),
+'\nNumber of members with more than 14 days length of stay:', length(which(test_df$ip_days > 14)))
+
+final_df %>% 
+  filter(ip_days <=30) %>%
+  ggplot(aes(x = ip_days)) +
+  geom_bar() +
+  labs(subtitle = "Length of Inpatient Stay")
+```
+
+
+## Fitting Logistic Models
+
+  * With IP days
+  * Without IP days
+  * Binned IP days (>1 day, >3 days, >5days, >7 days, >14 days)
+  
+
+```{r, echo = T}
+# ----- fit the models ----- #
+## with IP days
+glm_fit <- glm(
+  readmit_30_flag ~ . - savvy_pid -ip_bin_1plus -ip_bin_3plus -ip_bin_5plus -ip_bin_7plus -ip_bin_14plus,
+  data = train_df,
+  family = binomial(link = "logit")
+) 
+
+## without IP days
+glm_fit_no_IP <- glm(
+  readmit_30_flag ~ . -savvy_pid -ip_days -ip_bin_1plus -ip_bin_3plus -ip_bin_5plus -ip_bin_7plus -ip_bin_14plus,
+  data = train_df,
+  family = binomial(link = "logit")
+)
+
+## with binned IP days
+glm_fit_bin_IP <- glm(
+  readmit_30_flag ~ . -savvy_pid -ip_days,
+  data = train_df,
+  family = binomial(link = "logit")
+)
+```
+
+```{r}
+## calibration plot function
+calib_plot <- function(newdata, fitted.mod, n_buckets = 20){
+  
+ids_w_preds <- 
+  newdata %>%
+  add_predictions(model = fitted.mod, type = "response") %>%
+  mutate(pred_quant = ntile(pred, n_buckets)) %>%
+  select(savvy_pid, pred, readmit_30_flag, pred_quant)
+
+# Data for calibration plot
+calib_info <- 
+  ids_w_preds %>% 
+  group_by(pred_quant) %>%
+  summarise(
+    true_probs = mean(readmit_30_flag), 
+    estim_probs = mean(pred),
+  ) %>%
+  ungroup() %>%
+  rename(ntile = pred_quant)
+
+# Scatter Plot
+plot <- calib_info %>%
+ggplot(aes(x = estim_probs, y = true_probs)) + 
+  geom_hline(yintercept = mean(ids_w_preds$readmit_30_flag), 
+             linetype = 2, 
+             col = 'red', 
+             size = 2) +
+  geom_point(size = 3) + 
+  labs(
+    x = "Estimated Readmission Rate", 
+    y = "True Readmission Rate", 
+    title = "Model Performace (each point represents 5% of population)"
+  ) + 
+  geom_smooth(method = "lm") +
+  geom_abline(slope = 1, intercept = 0) +
+  geom_label(aes(x = 0.025, y = 0.125, label = "Overall Readmission Rate")) +
+  xlim(0, 0.24) +
+  ylim(0, 0.24) +
+  theme_rnd()
+
+  return(list(calib_info, plot))
+
+}
+
+```
+
+## Calibration plots {.tabset .tabset-fade}
+
+#### **True admission rates for the top 5%**
+```{r}
+rates <- rbind(calib_plot(test_df, glm_fit)[[1]][20,],
+  calib_plot(test_df, glm_fit_no_IP)[[1]][20,]) %>%
+  rbind(calib_plot(test_df, glm_fit_bin_IP)[[1]][20,]) %>% 
+  select(-ntile)
+
+data.frame(models = c('With IP days',
+                      'Without IP days',
+                      'With IP flags'),
+           rates)
+```
+
+####
+
+### with IP days
+```{r, fig.width=10, fig.height=6}
+calib_plot(test_df, glm_fit)[[2]]
+```
+
+### without IP days
+```{r, fig.width=10, fig.height=6}
+calib_plot(test_df, glm_fit_no_IP)[[2]]
+```
+
+### binned IP days
+```{r, fig.width=10, fig.height=6}
+calib_plot(test_df, glm_fit_bin_IP)[[2]]
+```
+
+
+## Coefficient plots {.tabset .tabset-fade}
+
+### with IP days
+```{r, fig.width = 10, fig.height = 7}
+plot_glm_coef_labs(glm_fit, cutoff = 'positive')
+plot_glm_coef_labs(glm_fit, cutoff = 'negative')
+```
+
+### without IP days
+```{r, fig.width = 10, fig.height = 7}
+plot_glm_coef_labs(glm_fit_no_IP, cutoff = 'positive')
+plot_glm_coef_labs(glm_fit_no_IP, cutoff = 'negative')
+```
+
+### binned IP days
+```{r, fig.width = 10, fig.height = 7}
+plot_glm_coef_labs(glm_fit_bin_IP, cutoff = 'positive')
+plot_glm_coef_labs(glm_fit_bin_IP, cutoff = 'negative')
+```
+
+
+## Cost explorations {.tabset .tabset-fade}
+```{r}
+library(bigrquery)
+pid <- 'research-01-217611'
+DB <- 'foc_interoperability.ini_932'
+options(httr_oauth_cache = "~/.httr-oauth", httr_oob_default = TRUE)
+options(scipen = 20)
+
+
+test_ids <- data.frame( savvy_pid = test_df$savvy_pid)
+
+bq_project_query(x = pid, query = glue("drop table {DB}_temp_test_ids"))
+
+# upload predicitons to GBQ
+ids_tab <- bq_table(
+  project = pid,
+  dataset = "foc_interoperability", 
+  table = "ini_932_temp_test_ids"
+)
+
+bq_table_upload(
+  x = ids_tab, 
+  values = test_ids, 
+  create_disposition = "CREATE_IF_NEEDED", 
+  fields = as_bq_fields(test_ids)
+)
+```
+
+```{r}
+# Cost/spend information by category for members in the test set
+q_preds_cost <-
+  glue("
+    SELECT
+      a.savvy_pid,
+      b.spend_30, 
+      b.spend_60,
+      b.spend_90,
+      b.srvc_typ_cd,
+      b.hce_srvc_typ_desc
+    FROM
+      {DB}_temp_test_ids AS a
+    LEFT JOIN
+      {DB}_costs AS b
+    ON 
+      a.savvy_pid = b.savvy_pid
+  ") 
+
+spend_information <- 
+  glue("
+    SELECT
+      savvy_pid,
+      srvc_typ_cd,
+      hce_srvc_typ_desc,
+      SUM(spend_30) AS spend_30
+    FROM
+      ({q_preds_cost})
+    GROUP BY
+      savvy_pid,
+      srvc_typ_cd,
+      hce_srvc_typ_desc
+  ") %>%
+  load_bq(db = pid, query = .)
+```
+
+```{r}
+
+plot_spend_barplot <- function(newdata, fitted.model, n_buckets = 20){
+
+## add predictions
+ids_w_preds <- 
+  newdata %>%
+  add_predictions(model = fitted.model, type = "response") %>%
+  mutate(pred_quant = ntile(pred, n_buckets)) %>%
+  select(savvy_pid, pred, readmit_30_flag, pred_quant)
+
+counts_by_group <- 
+  ids_w_preds %>%
+  mutate(ntile = ifelse(pred_quant <= 18, '<19', pred_quant)) %>% 
+  mutate(
+    ntile = factor(
+      ntile, 
+      levels = c("<19", "19", "20"), 
+      labels = c("Bottom 90%", "90-95%", "Top 5%")
+    )
+  ) %>% 
+  group_by(ntile) %>%
+  summarise(member_count = n())
+
+# Separate 90-95th percentiles and 95-100 percentiles of predictions
+spend_w_count <- 
+  spend_information %>% left_join(ids_w_preds) %>% 
+  mutate(ntile = ifelse(pred_quant <= 18, '<19', pred_quant)) %>% 
+  mutate(
+    ntile = factor(
+      ntile, 
+      levels = c("<19", "19", "20"), 
+      labels = c("Bottom 90%", "90-95%", "Top 5%")
+    )
+  ) %>% 
+  left_join(
+    counts_by_group, 
+    by = "ntile"
+  )
+# costs bar plot
+# Plot ip spend in 30 days post-discharge by category 
+ip_spend <-
+  spend_w_count %>%
+  filter(srvc_typ_cd == 'ip') %>%
+  group_by(ntile, hce_srvc_typ_desc, member_count) %>%
+  summarise(
+    total_spend = sum(spend_30)
+  ) %>%
+  mutate(pmpm = total_spend / member_count)
+
+ip_spend %>% 
+  ggplot(
+    aes(
+      x = fct_reorder(hce_srvc_typ_desc, pmpm), 
+      y = pmpm, 
+      fill = factor(ntile)
+    )
+  ) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  coord_flip() + 
+  theme_rnd() + 
+  scale_fill_rnd() +
+  labs(
+    x = "Service Description", 
+    y = "Spend ($)",
+    title = "Average Inpatient Spend by Category", 
+    subtitle = "Thirty Days After Discharge", 
+    fill = "Risk Group"
+  )
+}
+```
+
+### with IP days
+```{r, fig.width = 10, fig.height = 6}
+plot_spend_barplot(test_df, glm_fit)
+```
+
+### without IP days
+```{r,fig.width = 10, fig.height = 6}
+plot_spend_barplot(test_df, glm_fit_no_IP)
+```
+
+### binned IP days
+```{r, fig.width = 10, fig.height = 6}
+plot_spend_barplot(test_df, glm_fit_bin_IP)
+```
+
+
+

@@ -1,0 +1,152 @@
+---
+title: "Investigate Incorrect Predictions"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    code_folding: hide
+    df_print: paged
+    highlight: haddock
+    theme: flatly
+---
+
+
+```{r include=FALSE}
+library(drake)
+library(data.table)
+library(magrittr)
+library(tidyverse)
+library(caret)
+library(here)
+
+devtools::load_all(here("savvyR"))
+cache <- new_cache(path = "/storage_pool/cache/")
+loadd(starts_with("best_model_predict"), cache = cache)
+loadd(test_df_v2, cache = cache) 
+
+frail_cols <- colnames(test_df_v2)[str_detect(colnames(test_df_v2),"^frail_")] %>% 
+  str_replace_all("_Q\\d$", " ") %>% 
+  str_trim() %>% 
+  unique()
+
+frail_sums <- lapply(frail_cols, function(x){
+  test_df_v2 %>% 
+    select(savvy_pid, contains(x)) %>% 
+    mutate(!!sym(x) :=ifelse(rowSums(.[2:5]) > 0, 1, 0) ) %>% 
+    select(savvy_pid, !!sym(x))
+    
+    
+})
+frail_df <- as.tibble(Reduce(function(x, y) left_join(x, y, by = "savvy_pid"), frail_sums))
+test_df_v2 %<>%
+  select(-starts_with("frail_")) %>% 
+  left_join(frail_df, by = "savvy_pid")
+setDT(test_df_v2)
+
+
+```
+
+## Chronic Conditions
+
+### By False Positive Rate
+
+```{r}
+GenerateProportion = function(preds, pattern)
+{
+  preds <- as.data.table(preds)
+  df <-  merge(test_df_v2, preds, by = "savvy_pid", all.x = TRUE)
+  cols <- colnames(df)[str_which(colnames(df), pattern)]
+  metrics <- 
+  lapply(cols, 
+         function(x){
+           select(df, savvy_pid, truth, predicted, sym(x)) %>% 
+             filter(!!sym(x) == 1) %>% 
+             {confusionMatrix(.$truth, .$predicted)} %>% 
+             .$table %>% 
+             {tibble(false_positives = .[1,2], 
+                    false_negatives = .[2,1],
+                    total_positives = sum(.[,1]),
+                    total_negatives = sum(.[,2]))} %>% 
+              mutate(sub_cohort = str_replace(x, pattern, ""), 
+                     false_positive_rate = false_positives/total_negatives * 100,
+                     false_negative_rate = false_negatives/total_positives * 100)
+         }) 
+  
+  return(bind_rows(metrics))
+}
+cc <- GenerateProportion(best_model_predict_0.02_0, "^cc_")
+ff <- GenerateProportion(best_model_predict_0.02_0, "frail_")
+srs <- GenerateProportion(best_model_predict_0.02_0, "serious_")
+
+GenerateTable = function(prop, ..., n = NULL)
+{
+  col_quo <- enquos(...)
+  cols_str <- sapply(col_quo, rlang::quo_text)
+  rate_col <- sym(str_subset(cols_str, "_rate"))
+   # return(rate_col)
+  
+  if (is.null(n)) {
+    n <- nrow(prop)
+  }
+  df <- expr(prop %>% 
+    select(sub_cohort, !!!col_quo) %>% 
+    slice_max(!!rate_col, n =n)) %>% 
+    rlang::eval_tidy()
+  return(df)
+  # ymin = min(0, min(pull(df, !!col_quo)))
+  # ymax = max(pull(df, !!col_quo))
+  # df %>% 
+  #   ggplot(aes(x = reorder(sub_cohort, -!!col_quo), ymax = !!col_quo)) +
+  #   geom_linerange(stat = "identity", ymin = ymin, color = "dodgerblue4") +
+  #   geom_text(aes(label = scales::percent(!!col_quo, accuracy = 0.1),
+  #                 y = !!col_quo), nudge_y = 0.005) +
+  #   scale_y_continuous(labels = scales::percent) +
+  #   coord_cartesian(ylim = c(ymin, ymax + 0.1)) +
+  #   coord_flip() +
+  #   theme_rnd(14) +
+  #   xlab(xlab)
+    
+  
+}
+    
+GenerateTable(cc, false_positives, total_negatives,  false_positive_rate, n = 5)      
+  
+  
+  
+
+```
+
+
+### By False Negative Rate
+```{r}
+GenerateTable(cc, false_negatives, total_positives,  false_negative_rate, n = 5)      
+```
+
+
+## Frailty Features
+
+### False Positive Rate
+```{r}
+
+GenerateTable(ff, false_positives, total_negatives,  false_positive_rate, n = 5)      
+```
+
+### False Negative Rate
+```{r}
+GenerateTable(ff, false_negatives, total_positives,  false_negative_rate, n = 5)      
+```
+
+
+## Serious Conditions
+### False Positive Rate
+```{r}
+GenerateTable(srs, false_positives, total_negatives,  false_positive_rate, n = 5)      
+```
+
+### False Negative Rate
+```{r}
+GenerateTable(srs, false_negatives, total_positives,  false_negative_rate, n = 5)      
+```

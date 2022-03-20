@@ -1,0 +1,497 @@
+---
+title: "Number of Admissions in 2018 (Negative Binomial)"
+output: 
+  html_notebook:
+    toc: true
+    toc_depth: 5
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    code_folding: hide
+    df_print: paged
+    highlight: haddock
+    theme: flatly
+---
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = T, warning = F, message = F, comment = NA, fig.align = 'center')
+
+library(MASS)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(caret)
+devtools::load_all("~/savvyR")
+# install.packages("countreg", repos = 'http://R-Forge.R-project.org')
+library(countreg)
+library(pscl)
+library(kableExtra)
+library(stringr)
+library(scales)
+
+source("../plot_glm_coef.R")
+source("mod_metrics.R")
+```
+
+```{r}
+# load fitted models 
+# models saved due to long runtimes of zinb models
+## Negative binomial models
+load('~/bkt_inv_post_acute/fit_nb_mods.Rdata')
+## Zero Inflated negative binomial models
+load('~/bkt_inv_post_acute/fit_zinb_mods.Rdata')
+```
+
+
+## Loading data and pre-processing 
+
+```{r}
+# load admission count data
+pid <- 'research-01-217611'
+DB <- 'foc_interoperability.ini_1085'
+options(httr_oauth_cache = "~/.httr-oauth", httr_oob_default = TRUE)
+options(scipen = 20)
+
+admit_cnt_df <- load_bq(db = pid,
+              query = glue("SELECT *
+                            FROM (
+                              SELECT *
+                              FROM
+                                `{DB}_admission_counts_features_2017_2018`
+                              WHERE
+                                age_2017 >= 65) AS a
+                            LEFT JOIN (
+                              SELECT *
+                              FROM
+                                `{DB}_frail_feats_by_quarter`) AS b
+                            USING
+                              (savvy_pid)"))
+
+
+## convert  NAs to 0, all on quarterly frailty features
+admit_cnt_df[is.na(admit_cnt_df)] <- 0
+# save data in bucket
+# save(admit_cnt_df, file = '~/bkt_inv_post_acute/admit_cnt_df.rds')
+load('~/bkt_inv_post_acute/admit_cnt_df.rds')
+
+```
+
+```{r}
+#fix values 
+admit_cnt_df$gender <- factor(admit_cnt_df$gender)
+admit_cnt_df$age_cat <- cut(admit_cnt_df$age_2017, 
+                            breaks = c(65,70,75,80, max(admit_cnt_df$age_2017)+1),
+                            labels = c("65-69", "70-74", "75-79", "80+"),
+                            right = F)
+
+#filter out members with more than 200 ip days
+admit_cnt_df <- admit_cnt_df %>% 
+  filter(hosp_days <= 200 & snf_days <= 200)
+
+# split data into train and test
+set.seed(1085)
+trainIndex <- createDataPartition(1:nrow(admit_cnt_df), p=0.8, list = FALSE)
+
+train_df <- admit_cnt_df[trainIndex,]
+test_df <- admit_cnt_df[-trainIndex,]
+
+# center ip days
+train_df <- train_df %>% mutate_at(c('hosp_days', 'snf_days'), ~(scale(., scale = FALSE) %>% as.vector))
+test_df <- test_df %>% mutate_at(c('hosp_days', 'snf_days'), ~(scale(., scale = FALSE) %>% as.vector))
+
+# save(train_df, test_df, file = '~/bkt_inv_post_acute/nb_train_test_df.Rdata')
+load('~/bkt_inv_post_acute/nb_train_test_df.Rdata')
+
+
+```
+
+
+## Response Summary
+```{r}
+# distribution of the response
+ggplot(admit_cnt_df, aes(x = admit_counts)) +
+  geom_bar() +
+  theme_bw() +
+  scale_y_continuous(label = comma) +
+  labs(
+    x = 'Number of admissions in 2018',
+    y = 'Member count'
+  ) +
+  theme(axis.title = element_text(face = 'bold'))
+
+# table of proportions for all the datasets
+prop_table <- list()
+
+for(i in 1:3){
+  data_list <- list(admit_cnt_df, train_df, test_df)
+  table_names <- list('all data', 'train data', 'test data')
+  
+ temp <- data_list[[i]] %>% 
+  mutate(data = table_names[[i]],
+         with_admit = ifelse(admit_counts > 0, 1,0)) %>% 
+  group_by(data, with_admit) %>% 
+  summarize(member_cnt = n(),
+            prop = round(100*member_cnt/nrow(data_list[[i]]), 3)) 
+ 
+ prop_table[[i]] <- temp
+} 
+do.call('rbind',prop_table) %>% 
+kable(format = 'html', escape = FALSE) %>% 
+  kable_styling() 
+
+
+# check for response dispersion
+c(mean = mean(train_df$admit_counts), 
+  var = var(train_df$admit_counts),
+  ratio = var(train_df$admit_counts)/mean(train_df$admit_counts))
+```
+
+
+```{r}
+# creating feature sets
+feat_sets <- list(
+  demogs = c('gender', 'age_cat'),
+  ip_days = c('hosp_days', 'snf_days'),
+  cc = grep('cc_', colnames(train_df), value = T),
+  frailty =  grep('frail_.*[[:alpha:]]$', colnames(train_df), value = T),
+  frailty_qtr = grep("_Q", colnames(train_df), value = T)
+)
+
+# formulas
+formulas <- list(
+  fm_demog_days = reformulate(termlabels = c(feat_sets$demogs, feat_sets$ip_days),
+                              response = 'admit_counts'),
+  fm_demog_days_cc = reformulate(termlabels = c(feat_sets$demogs, feat_sets$ip_days, feat_sets$cc),
+                              response = 'admit_counts'),
+  fm_all = reformulate(termlabels = c(feat_sets$demogs, feat_sets$ip_days, feat_sets$cc, feat_sets$frailty),
+                              response = 'admit_counts'),
+  fm_all_qtr = reformulate(termlabels = c(feat_sets$demogs, feat_sets$ip_days, feat_sets$cc, feat_sets$frailty_qtr),
+                              response = 'admit_counts')
+)
+```
+
+## Model Fitting  
+
+### Negative Binomial Models {.tabset .tabset-fade}
+
+#### demogs and ip days
+```{r}
+# demogs and ip days
+nb_mod1 <- glm.nb(formulas$fm_demog_days, 
+                  data =  train_df)
+
+summary(nb_mod1) 
+```
+
+#### demogs, ip days and cc
+```{r}
+# demographics, ip days, and chronic condition model
+nb_mod2 <- glm.nb(formulas$fm_demog_days_cc, 
+                  data =  train_df)
+
+summary(nb_mod2) 
+```
+
+#### with frailty
+```{r}
+# demogs and frailty features
+nb_mod3 <- glm.nb(formulas$fm_all, 
+                  data = train_df)
+
+summary(nb_mod3) 
+```
+
+#### with quarterly frailty
+```{r}
+nb_mod4 <- glm.nb(formulas$fm_all_qtr, 
+                  data = train_df)
+
+summary(nb_mod4) 
+
+nb_mods <- list(nb_mod1, nb_mod2, nb_mod3, nb_mod4)
+#save(nb_mod1, nb_mod2, nb_mod3, nb_mod4, file = '~/bkt_inv_post_acute/fit_nb_mods.Rdata')
+```
+
+
+### Coefficient plots {.tabset .tabset-fade}
+#### demogs and ip days
+```{r}
+plot_glm_coef(nb_mod1) +
+  labs(y = 'Change in Expected Counts')
+```
+
+#### demogs, ip days and cc
+
+```{r, fig.height=6, fig.width=9}
+plot_glm_coef(nb_mod2) +
+  labs(y = 'Change in Expected Counts')
+```
+
+#### with frailty 
+```{r, fig.height=6, fig.width=9}
+ plot_glm_coef(nb_mod3) +
+  labs(y = 'Change in Expected Counts')
+```
+
+#### with quarterly frailty 
+```{r, fig.height= 7, fig.width=9}
+plot_glm_coef(nb_mod4, cutoff = 'positive') +
+  labs(y = 'Change in Expected Counts')
+```
+```{r}
+plot_glm_coef(nb_mod4, cutoff = 'negative') +
+  labs(y = 'Change in Expected Counts')
+```
+
+
+### Rootograms{.tabset .tabset-fade}
+#### demogs and ip days
+
+```{r}
+rootogram(nb_mod1)
+```
+
+#### demogs, ip days and cc
+
+```{r}
+rootogram(nb_mod2)
+```
+
+#### with frailty
+```{r}
+rootogram(nb_mod3)
+```
+
+#### with quarterly frailty
+```{r}
+rootogram(nb_mod4)
+```
+
+### Zero-inflated Negative Binomial {.tabset .tabset-fade}
+Use zero-inflated negative binomial model to account for the presense of excess zeros in the data
+
+#### demogs and ip days
+```{r}
+# demogs and ip days
+## saving zero inflated models due to long runtimes (20mins~2hrs)
+zinb_mod1 <- countreg::zeroinfl(formulas$fm_demog_days,
+                      data = train_df,
+                      dist = "negbin",
+                      link = "logit")
+
+summary(zinb_mod1) 
+```
+
+#### demogs, ip days and cc
+```{r}
+zinb_mod2 <- countreg::zeroinfl(formulas$fm_demog_days_cc,
+                      data = train_df,
+                      dist = "negbin",
+                      link = "logit")
+
+summary(zinb_mod2)
+```
+
+#### with frailty
+```{r}
+zinb_mod3 <- countreg::zeroinfl(formulas$fm_all,
+                      data = train_df,
+                      dist = "negbin",
+                      link = "logit")
+
+summary(zinb_mod3) 
+```
+
+#### with quarterly frailty
+```{r}
+zinb_mod4 <- countreg::zeroinfl(formulas$fm_all_qtr,
+                      data = train_df,
+                      dist = "negbin",
+                      link = "logit")
+
+summary(zinb_mod4) 
+
+zinb_mods <- list(zinb_mod1, zinb_mod2, zinb_mod3, zinb_mod4)
+# save(zinb_mod1, zinb_mod2, zinb_mod3, zinb_mod4, file = '~/bkt_inv_post_acute/fit_zinb_mods.Rdata')
+```
+
+
+### Coefficient plots {.tabset .tabset-fade}
+
+#### demogs and ip days
+```{r}
+plot_zinb_coef(zinb_mod1)[[1]] ;plot_zinb_coef(zinb_mod1)[[2]] 
+```
+
+#### demogs, ip days and cc
+
+```{r}
+plot_zinb_coef(zinb_mod2)[[1]] ;plot_zinb_coef(zinb_mod2)[[2]] 
+```
+
+#### with frailty 
+```{r, fig.height=6, fig.width=9}
+plot_zinb_coef(zinb_mod3)[[1]] ;plot_zinb_coef(zinb_mod3)[[2]] 
+```
+
+#### with quarterly frailty 
+```{r, fig.height=7, fig.width=9, dpi = 750}
+plot_zinb_coef(zinb_mod4)[[1]] ;plot_zinb_coef(zinb_mod4)[[2]] 
+```
+
+
+### Rootograms {.tabset .tabset-fade}
+
+#### demogs and ip days
+```{r}
+rootogram(zinb_mod1)
+```
+
+#### demogs, ip days and cc
+```{r}
+rootogram(zinb_mod2)
+```
+
+
+#### with frailty
+```{r}
+rootogram(zinb_mod3)
+```
+
+#### with quarterly frailty
+```{r}
+rootogram(zinb_mod4)
+```
+
+## Model Comparison
+
+### Metrics on test data {.tabset .tabset-fade}
+
+#### admit_counts > 0
+```{r}
+metric_smry(nb_mods, zinb_mods, count = 0, formulas, cutoff = 0.5)
+```
+
+#### admit_counts > 1
+```{r}
+metric_smry(nb_mods, zinb_mods, 1, formulas, cutoff = 0.5)
+```
+
+#### admit_counts > 2
+```{r}
+metric_smry(nb_mods, zinb_mods, 2, formulas, cutoff = 0.5)
+```
+
+
+### % Positive Predictions {.tabset .tabset-fade}
+
+#### admit_counts > 0
+
+```{r}
+pospred_smry(nb_mods, zinb_mods, count = 0, cutoff = 0.5)
+```
+
+
+#### admit_counts > 1
+
+```{r}
+pospred_smry(nb_mods, zinb_mods, count = 1, cutoff = 0.5)
+```
+
+#### admit_counts > 2
+
+```{r}
+pospred_smry(nb_mods, zinb_mods, count = 2, cutoff = 0.5)
+```
+
+
+
+
+
+
+## Exploring zinb_mod4
+
+Model with gender, age, ip days, chronic conditions, frailty categories by quarter as predictors.
+Lowest RMSE and PPV
+
+```{r}
+mod_viz <- mod_sim_viz(test_df, zinb_mod4); mod_viz[[3]] 
+```
+
+
+```{r, include= FALSE}
+  
+pred <- predict(zinb_mod4, test_df, type = "response")
+
+# generate simulated negbinom variates
+sim_pred <- rnbinom(n = test_df$admit_counts, mu = pred, size = zinb_mod4$theta) 
+
+# creating obs vs simulated df
+obs <- table(test_df$admit_counts) %>% data.frame() %>% mutate(type = 'actual')
+sim <- table(sim_pred) %>% data.frame() %>% mutate(type = 'simulated')
+names(sim) <- c("Var1", "Freq", "type")
+
+tmp <- as.data.frame(rbind(obs, sim)) %>% mutate(with_admit = ifelse(Var1 != 0, 1,0)) 
+
+tmp %>% 
+  group_by(type, with_admit) %>% 
+  summarise(count = sum(Freq)) %>% 
+  group_by(type) %>% 
+  mutate(prop = round(count/sum(count)*100,3)) %>% 
+kable(format = 'html', escape = FALSE) %>% 
+  kable_styling() 
+```
+
+
+```{r}
+# create df with actual and simulated counts
+plot_df <- data.frame(pred = sim_pred, actual = test_df$admit_counts)
+
+# actual vs. simulated data on test data
+mod_result <- plot_df %>%
+  mutate(abs_diff = abs(actual - pred),
+         cnt_grp = case_when(
+           actual == 0 ~ '0',
+           actual == 1 ~ '1',
+           actual == 2 ~ '2',
+           actual >= 3 ~ '3+'
+         )) 
+
+mod_acc_smry <- mod_result %>% 
+  group_by(cnt_grp) %>% 
+  dplyr::summarise(mem_cnt = n(),
+            proportion = round(n()/nrow(mod_result)*100,3),
+            correct_pred_mem_cnt = length(which(abs_diff == 0)),
+            pred_exact_admit = round(sum(ifelse(abs_diff == 0, 1,0))/mem_cnt,4),
+            pred_within_1_admit = round(sum(ifelse(abs_diff <= 1, 1,0))/mem_cnt,4),
+            pred_within_2_admit = round(sum(ifelse(abs_diff <= 2, 1,0))/mem_cnt,4),
+            pred_within_3_admit = round(sum(ifelse(abs_diff <= 3, 1,0))/mem_cnt,4)
+            ) 
+  
+mod_acc_smry %>% 
+kable(format = 'html', escape = FALSE) %>% 
+  kable_styling() 
+
+library(ggrepel)
+
+mod_acc_smry[,-c(2:4)] %>% gather(pred_acc, values, -cnt_grp) %>% 
+  ggplot(aes(y = values, x = pred_acc, col = cnt_grp)) +
+  geom_line(aes(group = cnt_grp)) +
+  geom_point(shape = 15, size =2) +
+  geom_label_repel(aes(label = scales::percent(values, .11)), size = 3)+
+  scale_y_continuous(labels = scales::percent)+
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 0.5)
+  )+
+  labs(y = 'Proportion of Predictions',
+       x = '',
+       title = 'Model prediction on test data',
+       subtitle = 'Zero-inflated Negative Binomial (demogs, ip days, chronic conditions, frailty by quarter)',
+       col = 'Number of\nAdmissions')
+  
+```
+
+
+
+

@@ -1,0 +1,35 @@
+---
+title: '__Statistical Modeling Course__'
+subtitle: '__Cross Validation Assignment__'
+output:
+  pdf_document:
+    fig_height: 3
+    fig_width: 4.5
+    extra_dependencies: ["xcolor"]
+header-includes:
+  - \usepackage{setspace}\onehalfspacing
+fontsize: 11pt
+---
+
+\definecolor{blue}{HTML}{0066f5}
+
+1. Explain how validation set approach, MCMC cross-validation, *k*-fold cross-validation, and LOOCV are implemented.
+1. What are the advantages and disadvantages of MCMC cross-validation and *k*-fold cross-validation relative to each other?
+1. We will now perform cross-validation on a simulated data set.
+    a. Generate a simulated data set as follows. In this data set, what is *n* and what is *p*? Write out the model used to generate the data in equation form.
+        
+        ```{r, eval = FALSE}
+        set.seed(1)
+        x = rnorm(100)
+        y = x - 2*x^2 + rnorm(100)
+        ```
+        
+    a. Create a scatteplot of $X$ against $Y$. Comment on what you find.
+    a. Set a random seed, and then compute the MCMC cross-validation test error that results from fitting the following three models using least squares. Note you may find it helpful to use the \color{blue} `data.frame` \color{black} function to create a single data set containing both $X$ and $Y$.
+        i. $Y = \beta_0 + \beta_1X + \epsilon$
+        i. $Y = \beta_0 + \beta_1X + \beta_2X^2 + \epsilon$
+        i. $Y = \beta_0 + \beta_1X + \beta_2X^2 + \beta_3X^3 + \epsilon$
+    a. Repeat c. using another random seed, and report your results. Are your results the same as what you got in c.? Why?
+    a. Now, perform MCMC cross-validation three times and get the average test errors from those three runs. Which of the models in c. had the smallest error? Is this what you expected? Explain your answer.
+    a. Comment on the statistical significance of the coefficient estimates that results from fitting each of the models in c. using least squares. Do these results agree with the conclusions drawn based on the cross-validation results?
+1. Fit three three models again above, but now performing the 5-fold cross-validation using the function \color{blue} `cv.glm`\color{black}. Report the average test error for each model from performing the cross-validation three times. Which model had the smallest error? Did you get the same results when you used the MCMC cross-validation?

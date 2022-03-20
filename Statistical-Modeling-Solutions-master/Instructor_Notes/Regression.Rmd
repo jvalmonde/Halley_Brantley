@@ -1,0 +1,416 @@
+---
+title: "Regression"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## Multivariate Normal Distribution
+
+- Random variable: $\mathbf{y} \in \mathbb{R}^n$, 
+- Mean vector: $\mu \in \mathbb{R}^n$
+- Variance-covariance matrix: $\Sigma \in \mathbb{R}^{n \times n}$
+- $\Sigma_{\{1,1\}}$ is the variance of $y_{1}$. $\Sigma_{\{1,2\}}$ is $Cov(y_1, y_2)$
+
+$$ f(\mathbf{y}\vert\mu, \Sigma) = (2\pi)^{-n/2}\lvert\Sigma\rvert^{-1/2}\exp\left\{-\frac{1}{2}(\mathbf{y}-\mu)^T\Sigma^{-1}(\mathbf{y}-\mu)\right\}$$
+
+## Regression MLE estimate 
+- Given response, $y$, and predictors, $X$
+- Assume $\Sigma = \sigma^2 \mathbf{I}$
+- Assume $\mu = X\beta$ where $\beta \in \mathbb{R}^p$ and $X \in \mathbb{R}^{n \times p}$
+- Find $\beta$ that maximizes the likelihood $L(\beta,\sigma^2\vert y) =$ 
+
+$$(2\pi)^{-n/2}\lvert\sigma^2I\rvert^{-1/2}\exp\left\{-\frac{1}{2}(\mathbf{y}-X\beta)^T(\sigma^2I)^{-1}(\mathbf{y}-X\beta)\right\}$$
+- Equivalent to maximizing log-likelihood, $\mathcal{l}(\beta, \sigma^2\vert y)=$
+$$
+ -\frac{n}{2}\log(2\pi)+ -\frac{n}{2}\log(\sigma^2) + \left\{\frac{-1}{2}(\mathbf{y}-X\beta)^T(\sigma^2I)^{-1}(\mathbf{y}-X\beta)\right\}
+$$
+
+## MLE of $\beta$
+$$ \begin{align*}
+\frac{\partial}{\partial\beta}\frac{-1}{2\sigma^2}(\mathbf{y} - \mathbf{X}\beta)^T(\mathbf{y} - \mathbf{X}\beta) \overset{set}{=}& 0\\
+\frac{\partial}{\partial\beta}(\mathbf{y}^T\mathbf{y} - \mathbf{y}^TX\beta - \beta^TX^T\mathbf{y} + \beta^TX^TX\beta) =& 0 \\
+\frac{\partial}{\partial\beta}(\mathbf{y}^T\mathbf{y} - 2\beta^TX^T\mathbf{y} + \beta^TX^TX\beta) =& 0  \\
+-2X^T\mathbf{y} + 2X^TX\beta =& 0 \\
+\text{Normal Equations}~~~~X^TX\beta =& X^T\mathbf{y} \\
+ \widehat{\beta} = (X^TX)^{-1}X^Ty
+\end{align*}$$
+
+
+## Linear Model Assumptions
+
+Model:
+$$ Y  = X\beta + \epsilon$$
+
+$$\epsilon \sim N(0, \sigma^2)$$
+
+- Linearity
+- Constant variance
+- Normally distributed errors
+- Independent Errors
+
+These assumptions allow us to calculate the variance and distribution of 
+$\widehat{\beta}$ under the null hypothesis. 
+
+
+```{r, packages, echo = FALSE, include = FALSE, warning = FALSE}
+library(tidyverse)
+library(modelr)
+library(car)
+library(GGally)
+set.seed(1234)
+```
+
+## An easy example
+
+```{r, sim1, echo = FALSE}
+n <- 250
+X1 <- runif(n)*10
+Y <- 3 + 2*X1 + rnorm(n, sd = 2)
+sim1 <- tibble(Y = Y, X1 = X1)
+```
+
+```{r, ex1}
+ggplot(sim1, aes(y=Y, x = X1)) + geom_point()
+```
+
+## Fit a linear model {.smaller}
+```{r}
+fit1 <- lm(Y~X1, sim1)
+fit1_summ <- summary(fit1)
+fit1_summ
+```
+
+## Inspect Model Object {.smaller}
+```{r}
+str(fit1_summ)
+sigmaHat <- fit1_summ$sigma
+sigmaHat
+```
+
+## Add predictions and residuals to dataframe
+```{r}
+sim1_fit1 <- 
+  sim1 %>% 
+  add_predictions(fit1) %>% 
+  add_residuals(fit1) %>%
+  arrange(pred)
+
+head(sim1_fit1)
+```
+
+## Plot data with predictions
+```{r, fig.height = 3, fig.width = 3.5, fig.align="center"}
+ggplot(sim1_fit1, aes(x = X1, y=Y)) +
+  geom_point() + 
+  geom_line(aes(y=pred), col="red")
+       
+```
+
+## Plot residuals versus predictions - should have no trends
+
+```{r,fig.height = 3, fig.width = 3.5, fig.align="center"}
+ggplot(sim1_fit1, aes(x=pred, y = resid)) + 
+  geom_point() +
+  geom_abline(slope = 0, intercept = 0, col="red")
+```
+
+## Check for normality of residuals
+```{r, fig.height = 3, fig.width = 3.5, fig.align="center"}
+sim1_fit1 %>%
+  mutate(norm_pdf = dnorm(resid, 0, sd = sigmaHat)) %>%
+ggplot(aes(x = resid, y = ..density..)) + 
+  geom_histogram(bins = 30) +
+  geom_line(aes(y = norm_pdf),col = "red")
+```
+
+## Easier to use qqplot
+
+```{r}
+ggplot(sim1_fit1, aes(sample=resid)) + stat_qq() + stat_qq_line()
+```
+
+## Leverage
+
+Remember: 
+$$\widehat{\beta} = (X^TX)^{-1}X^TY$$
+$$\widehat{Y} = X\widehat{\beta} = X(X^TX)^{-1}X^TY = HY$$
+
+- $H=P_x$ is the "hat" matrix
+- $H$ projects $Y$ onto the column space of $X$.
+- The predictions are a weighted sum of the observations. 
+- Leverage of $Y_i$ is defined as the $i$th diagonal element of $H$. 
+- If the leverage is large, the weight of $Y_i$ on $\widehat{Y_i}$ is very large.
+
+## Cook's distance
+
+$$ D_i = \frac{1}{p}e_i^2 \frac{h_i}{1-h_i} $$
+
+- $e_i$ is the $i$th residual
+- $h_i$ is the leverage of the $i$th point
+- $p$ is the number of columns in $X$ (including intercept)
+
+## Plot 
+
+Observations with large values of Cook's distance should be checked for overly influencing fit. 
+
+```{r, warning = FALSE}
+plot(fit1,5)
+```
+
+## Another Example
+```{r, echo = FALSE}
+n <- 250
+X1 <- sample(c(0,1), n, replace = TRUE)
+X2 <- rnorm(n, 3)
+Y <- 2 + .5*X2 + X1*X2 + rnorm(n, sd = .5)
+sim2 <- tibble(Y = Y, 
+               X1 = factor(X1), 
+               X2 = X2)
+
+ggplot(sim2, aes(y=Y, x = X2, col = X1)) + geom_point()
+```
+
+## Model Fit {.smaller}
+
+```{r}
+fit2 <- lm(Y~X1*X2, sim2)
+summary(fit2)
+```
+
+## Plot predictions
+
+```{r, fig.height=3.5, fig.width=5, fig.align="center"}
+sim2 %>%
+add_predictions(fit2) %>%
+  ggplot(aes(x=X2, y=Y, col=X1)) + 
+  geom_point() +
+  geom_line(aes(y = pred, group = X1), col="black")
+```
+
+## Diagnostic plots {.smaller}
+```{r, fig.width = 6, fig.height = 5.5, fig.align="center", echo=FALSE}
+par(mfrow=c(2,2), mar=c(4,3,2,2))
+plot(fit2)
+```
+
+## A harder example
+
+```{r, echo = FALSE}
+n <- 250
+X1 <- sample(c(0,1), n, replace = TRUE)
+X2 <- rnorm(n, 2)
+X3 <- X2 + rnorm(n, sd = 3)
+Y <- 2 + X1*3 + .5*X2 + X1*X2 + .2*X3^2 + rnorm(n, sd = .5)
+sim3 <- tibble(Y = Y, 
+               X1 = factor(X1), 
+               X2 = X2, 
+               X3 = X3)
+```
+
+```{r, message = FALSE, warning=FALSE, echo = FALSE, fig.height=5, fig.width=5.5, fig.align="center"}
+ggpairs(sim3)
+```
+
+## Fit a model {.smaller}
+```{r}
+fit_additive <- lm(Y ~ X1 + X2 + X3, sim3)
+summary(fit_additive)
+```
+
+## Diagnostic plots {.smaller}
+```{r, fig.width = 6, fig.height = 5.5, fig.align="center", echo=FALSE}
+par(mfrow=c(2,2), mar=c(4,3,2,2))
+plot(fit_additive)
+```
+
+## Partial Residual Plots
+
+* Regress Y on everything except X2 - get resid1
+* Regress X2 on all other Xs - get resid2 
+* Plot resid1 vs resid 2
+
+```{r, fig.height = 4, fig.align="center"}
+car::crPlots(fit_additive)
+```
+
+## Fit Polynomial {.smaller}
+```{r}
+fit_poly <- lm(Y ~ X1 + X2 + I(X3^2), sim3)
+summary(fit_poly)
+```
+
+## Diagnostic plots {.smaller}
+```{r, fig.width = 6, fig.height = 5.5, fig.align="center", echo=FALSE}
+par(mfrow=c(2,2), mar=c(4,3,2,2))
+plot(fit_poly)
+```
+
+## Check for interactions {.smaller}
+
+```{r}
+fit_int <- lm(Y ~ X1*X2 + X1*X3 + I(X3^2), sim3)
+summary(fit_int)
+```
+
+## Check for interactions {.smaller}
+```{r}
+fit_int2 <- lm(Y ~ X1*X2 + X3 + I(X3^2), sim3)
+summary(fit_int2)
+```
+
+## Compare Nested Models
+```{r}
+anova(fit_int, fit_int2)
+```
+
+## Plot predictions
+```{r, echo=FALSE}
+sim3 %>% 
+  add_predictions(fit_int2) %>%
+  ggplot(aes(x=pred, y=Y)) + geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  labs(x = "Predicted Values", 
+       y = "Observed Values")
+```
+
+## Another Example
+```{r, echo = FALSE}
+n <- 250
+X1 <- sample(c(0,1), n, replace = TRUE)
+X2 <- rnorm(n, 2, sd = .2)
+X3 <- X2 + rnorm(n, sd = 1)
+Y <- exp(.2 + X1*.3 + .5*X2 - .25*X1*X2 + .6*X3 + rnorm(n, sd = .1))
+sim4 <- tibble(Y = Y, 
+               X1 = factor(X1), 
+               X2 = X2, 
+               X3 = X3)
+```
+
+```{r, message = FALSE, warning=FALSE, echo = FALSE, fig.height=5, fig.width=5.5, fig.align="center"}
+ggpairs(sim4)
+```
+
+## Fit a model {.smaller}
+```{r}
+fit4 <- lm(Y ~ X1 + X2 + X3, sim4)
+summary(fit4)
+```
+
+## Diagnostic plots {.smaller}
+```{r, fig.width = 6, fig.height = 5.5, fig.align="center", echo=FALSE}
+par(mfrow=c(2,2), mar=c(4,3,2,2))
+plot(fit4)
+```
+
+## Partial Residual Plots
+```{r}
+crPlots(fit4)
+```
+
+## Try a polynomial {.smaller}
+
+```{r}
+fitq <- lm(Y ~ X1 + X2 + X3 + I(X3^2))
+summary(fitq)
+```
+
+## Diagnostic plots {.smaller}
+```{r, fig.width = 6, fig.height = 5.5, fig.align="center", echo=FALSE}
+par(mfrow=c(2,2), mar=c(4,3,2,2))
+plot(fitq)
+```
+
+## Transform Response {.smaller}
+```{r}
+fitlog <- lm(log(Y) ~ X1 + X2 + X3, sim4)
+summary(fitlog)
+```
+
+## Diagnostic plots {.smaller}
+```{r, fig.width = 6, fig.height = 5.5, fig.align="center", echo=FALSE}
+par(mfrow=c(2,2), mar=c(4,3,2,2))
+plot(fitq)
+```
+
+## Partial Residual Plots
+```{r}
+crPlots(fitlog)
+```
+
+## Add interactions {.smaller}
+```{r}
+fitlog2 <- lm(log(Y) ~ X1*X2 + X1*X3, sim4)
+summary(fitlog2)
+```
+
+## Plot predictions
+```{r, fig.height=4, fig.align="center"}
+sim4 %>%
+  add_predictions(fitlog2) %>%
+  ggplot(aes(x=pred, y = log(Y))) + geom_point() +
+  geom_abline(slope = 1, intercept = 0)
+```
+
+## What if a transformation isn't enough?
+
+
+```{r, echo=FALSE}
+n <- 250
+X1 <- sample(c(0,1), n, replace = TRUE)
+X2 <- rnorm(n, 2, sd = .2)
+X3 <- X2 + rnorm(n, sd = 1)
+Y <- .2 + X1*.3 + .5*X2 - .25*X1*X2 + .6*X3 + rgamma(n, shape = 1, scale = 2)
+sim5 <- tibble(Y = Y, 
+               X1 = factor(X1), 
+               X2 = X2, 
+               X3 = X3)
+```
+
+```{r, message = FALSE, warning=FALSE, echo = FALSE, fig.height=5, fig.width=5.5, fig.align="center"}
+ggpairs(sim5)
+```
+
+## Boostrap the model coefficient CIs {.smaller}
+```{r}
+
+fit5 <- lm(Y~X1 + X2 + X3, sim5)
+
+model_lm <- 
+  sim5 %>% 
+  modelr::bootstrap(1000) %>%
+  mutate(model = map(strap, ~lm(Y ~ X1 + X2 + X3, data=.)))
+```
+
+## Extract Coefficients
+```{r}
+rq_tidy <- function(fit) {
+  df <- data.frame(term = names(coef(fit)), estimate = coef(fit))
+  row.names(df) <- NULL
+  return(df)
+}
+
+param_lm <- 
+  model_lm %>%
+  mutate(param = map(model, rq_tidy)) %>%
+  select(.id, param) %>% 
+  unnest() 
+```
+
+## Results {.smaller}
+```{r}
+param_lm  %>%
+  group_by(term) %>%
+  summarise(
+    mean = mean(estimate), 
+    q025 = quantile(estimate, .025), 
+    q975 = quantile(estimate, .975)
+  )
+
+confint.lm(fit5)
+```
+

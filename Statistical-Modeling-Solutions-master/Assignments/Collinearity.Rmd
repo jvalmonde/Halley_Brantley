@@ -1,0 +1,66 @@
+---
+title: '__Statistical Modeling Course__'
+subtitle: '__Collinearity Lab__'
+output:
+  pdf_document:
+    fig_height: 3
+    fig_width: 4.5
+    extra_dependencies: ["xcolor"]
+header-includes:
+  - \usepackage{setspace}\onehalfspacing
+fontsize: 11pt
+---
+
+```{r, echo = FALSE, include = FALSE}
+library(tidyverse)
+```
+
+\definecolor{blue}{HTML}{0066f5}
+
+This lab focuses on the *collinearity* problem. Perform the following commands in \color{blue} `R` \color{black}. The last line corresponds to creating a linear model in which \color{blue} `y` \color{black} is a function of \color{blue} `x1` \color{black} and \color{blue} `x2`\color{black}.
+
+```{r}
+set.seed(1)
+x1 = runif(100)
+x2 = 0.5*x1 + rnorm(100)/10
+y = 2 + 2*x1 + 0.3*x2 + rnorm(100)
+df = tibble(y, x1, x2)
+```
+    
+## Problem 1
+What is the correlation between \color{blue} `x1` \color{black} and \color{blue} `x2`\color{black}? What is the variance inflation factor? How about the condition number of $X^TX$?
+
+```{r}
+```
+
+
+## Problem 2
+Using this data, fit a least squares regression to predict \color{blue} `y` \color{black} using  \color{blue} `x1` \color{black} and \color{blue} `x2`\color{black}. How do these relate to the true $\beta_0$, $\beta_1$, and $\beta_2$? Can you reject the null hypothesis $H_0: \beta_1 = 0$? How about the null hypothesis $H_0: \beta_2 = 0$?
+
+```{r}
+```
+
+\textit{Answer:}
+
+## Problem 3
+Now fit a least squares regression to predict \color{blue} `y` \color{black} using only \color{blue} `x1` \color{black}. Comment on your results. Can you reject the null hypothesis $H_0: \beta_1 = 0$?
+
+```{r}
+```
+
+\textit{Answer:}
+
+## Problem 4
+Now fit a least squares regression to predict \color{blue} `y` \color{black} using only \color{blue} `x2` \color{black}. Comment on your results. Can you reject the null hypothesis $H_0: \beta_1 = 0$?
+
+```{r}
+```
+
+\textit{Answer:}. 
+
+## Problem 5
+Do the results obtained in Problem 2 and 4 contradict each other? Explain your answer.
+\textit{Answer: }
+
+
+

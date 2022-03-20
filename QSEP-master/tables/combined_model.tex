@@ -1,0 +1,44 @@
+%latex.default(outFactors, rowname = c(outNames), title = "",     file = "../tables/combined_model.tex")%
+\begin{table}[!tbp]
+\begin{center}
+\begin{tabular}{lrr}
+\hline\hline
+\multicolumn{1}{l}{}&\multicolumn{1}{c}{Logistic}&\multicolumn{1}{c}{Log-normal}\tabularnewline
+\hline
+(Intercept)&$0.289$&$114.740$\tabularnewline
+After ASD&$1.119$&$  1.056$\tabularnewline
+After Asthma&$1.079$&$  1.028$\tabularnewline
+After Cancer&$1.131$&$  1.057$\tabularnewline
+After Cerebral&$1.020$&$  0.985$\tabularnewline
+After T1D&$0.965$&$  0.953$\tabularnewline
+After Trauma&$0.964$&$  1.003$\tabularnewline
+After ASD x male&$1.071$&$  0.983$\tabularnewline
+After Asthma x male&$1.004$&$  1.011$\tabularnewline
+After Cancer x male&$1.012$&$  1.045$\tabularnewline
+After Cerebral  x male&$1.013$&$  1.129$\tabularnewline
+After T1D x male&$1.110$&$  1.053$\tabularnewline
+After Trauma x male&$1.042$&$  0.924$\tabularnewline
+male&$0.406$&$  0.814$\tabularnewline
+RAF (0.25, 1]&$0.873$&$  1.054$\tabularnewline
+RAF (1, 5]&$3.112$&$  1.915$\tabularnewline
+RAF (5, 10]&$4.347$&$  5.108$\tabularnewline
+RAF (10, 100]&$4.794$&$  1.003$\tabularnewline
+s(MedianHouseholdIncome)&$1.002$&$  1.001$\tabularnewline
+s(Age Adult)&$1.030$&$  0.994$\tabularnewline
+s(sick child age)&$0.993$&$  0.974$\tabularnewline
+single adult&$0.953$&$  1.007$\tabularnewline
+other child&$0.968$&$  1.001$\tabularnewline
+time&$1.000$&$  1.042$\tabularnewline
+Choice Plus Plan&$1.142$&$  1.047$\tabularnewline
+Select Plus&$1.050$&$  1.109$\tabularnewline
+Choice&$1.078$&$  0.946$\tabularnewline
+Gated HMO&$0.963$&$  0.977$\tabularnewline
+Male x RAF (0.25, 1]&$1.332$&$  1.032$\tabularnewline
+Male x RAF (1, 5]&$1.517$&$  0.987$\tabularnewline
+Male x RAF (5, 10]&$1.335$&$  1.014$\tabularnewline
+Male x RAF (10, 100]&$1.365$&$  1.025$\tabularnewline
+single adult x other child&$1.030$&$114.740$\tabularnewline
+male x single adult&$0.916$&$  1.056$\tabularnewline
+\hline
+\end{tabular}\end{center}
+\end{table}

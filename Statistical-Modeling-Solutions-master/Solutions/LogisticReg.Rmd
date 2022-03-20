@@ -1,0 +1,133 @@
+---
+title: '__Statistical Modeling Course__'
+subtitle: '__Logistic Regression Assignment__'
+output:
+  pdf_document:
+    fig_height: 3
+    fig_width: 4.5
+header-includes:
+  - \usepackage{setspace}\onehalfspacing
+fontsize: 11pt
+---
+
+
+```{r, echo = FALSE, include = FALSE}
+library(tidyverse)
+library(ISLR)
+library(plotROC)
+library(ModelMetrics)
+```
+
+We will use the `Default` data set in the `ISLR` package for this assignment. 
+
+# Problem 1 
+Fit a logistic regression model that uses  `student`, `income`  and  `balance`  to predict  `default` . Interpret the coefficients. 
+
+```{r}
+fit1 <- glm(default~., data = Default, family = "binomial")
+summary(fit1)
+exp(coef(fit1))
+```
+
+\textit{Answer: The odds of student defaulting is lower than non-students with the same balance and income by a factor of 0.52. Income does not have a significant effect on the odds of defaulting. For each dollar increase in balance odds of default increase by a factor of 1.0057.}
+
+# Problem 2
+Using the validation set approach, estimate the test error of this model. To do this, perform the following steps:
+
+- Write a function that takes 2 arguments: a formula and a dateset 
+- The function should do the following:
+  - Split the sample set intro a training set and a validation set.
+  - Fit a multiple logistic regression model using only the training observations.
+  - Obtain a prediction of default status for each individual in the validation set by computing the estimated probability of default for that individual, and classifying the individual to the `default`  category if the estimated probability is greater than 0.5.
+  - Compute the validation set error, which is the fraction of the observations in the validation set that are misclassified.
+- The function should return the validation error.
+  
+```{r}
+set.seed(2019)
+getTestError <- function(mod_formula, Default){
+  trainIDs <- sample(1:nrow(Default), nrow(Default)*.8)
+  train <- Default[trainIDs, ]
+  test <- Default[-trainIDs, ]
+  
+  fit <- glm(mod_formula, data=train, family = binomial)
+  probs <- predict(fit, newdata = test, type="response")
+  test$pred <- ifelse(probs>0.5, "Yes", "No")
+  sum(test$default != test$pred)/nrow(test)
+}
+
+getTestError(formula(default~income+balance), Default)
+```
+
+
+# Problem 3
+Use your function from Problem 2 to repeat the process ten times, using ten different splits of the observations into a training set and a validation set, then get the average of these test errors. Comment on the results obtained.
+
+```{r}
+set.seed(2020)
+testerror <- c() # Vector to store test error rates
+for (i in 1:10){ # Loop over splits
+  testerror[i] <- getTestError(formula(default~income+balance), Default)
+}
+testerror
+mean(testerror)
+```
+
+\textit{The test error rates are all between 2.2\% to 3\%}. 
+
+# Problem 4
+Using your choice of goodness of fit test, determine if the logistic regression model is reliable for inference. Compare the model's descriptive and explanatory power from its predictive accuracy in Problem 3.
+
+```{r, include = FALSE}
+library(caret)
+library(generalhoslem)
+```
+
+```{r}
+logitgof(Default$default, fitted(fit1), g = 15)
+Default$preds <- predict(fit1, type="response")
+cal <- calibration(factor(default, levels=c("Yes", "No"))~preds, data = Default)
+ggplot(cal, bwidth=2, dwidth = 3)
+```
+
+\textit{Answer: Both the Hoslem-Lemeshow test and the calibration plot indicate that the model is a good fit, 
+this in addition to producing accurate predictions.} 
+
+# Problem 5
+Add your predicted probabilites to the Default data frame and call them `preds`. Use the following code to plot the ROC curve. Calculate the confusion matrix and AUC. Comment on the results results. 
+
+```{r, echo = TRUE}
+Default <- 
+  Default %>% 
+  mutate(default_num = as.numeric(default)-1)
+
+# Check true positive and false positive rate when prob = 0.5
+ModelMetrics::confusionMatrix(Default$default_num, Default$preds, cutoff= 0.5)
+TPR <- 105/(105+228)
+FPR <- 40/(40+9627)
+
+ggplot(Default, aes(d=default_num, m=preds)) + 
+  geom_roc(n.cuts = 6, labelround = 4) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point(aes(x=FPR, y=TPR), col="red")
+```
+
+```{r}
+#AUC
+auc(Default$default_num, Default$preds)
+
+# Number of true positives and negatives
+table(Default$default)
+
+# Two ways of getting confusion matrix
+Default <- 
+  Default %>% 
+  mutate(default_hat = factor(ifelse(preds < 0.5, "No", "Yes"), 
+                               levels = c("No", "Yes")))
+table(Default$default_hat, Default$default)
+
+# Second method
+ModelMetrics::confusionMatrix(Default$default_num, Default$preds)
+```
+
+\textit{Answer: The ROC plot also indicates a good model, because there is a small true positive fraction when the cutoff is small and it increases much more rapidly than the true positive fraction. The AUC is close to 1, also indicating a good model. From the confusion matrix we can see that this data set is unbalanced. We have many more negatives than positives and the number of false positives is more than twice as high as the number of true positives our balanced accuracy is 0.85.}
+

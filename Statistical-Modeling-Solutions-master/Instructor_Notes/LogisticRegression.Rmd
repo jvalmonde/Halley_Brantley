@@ -1,0 +1,248 @@
+---
+title: "Logistic Regression"
+output: ioslides_presentation
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(vcdExtra)
+library(kableExtra)
+library(broom)
+library(caret)
+library(generalhoslem)
+```
+
+## Linear Regression 
+### Things You Should Know
+- Model parameter interpretation
+- Hypothesis tests for slopes and intercept
+- Confidence intervals for slopes and intercepts
+- Confidence versus prediction intervals
+- Model assumptions and how to check them using diagnostic plots
+
+## Odds
+
+Odds are another way of quantifying the probability of an event, used in gambling and logistic regression. 
+
+For some event $E$
+$$ odds(E) = \frac{Pr(E)}{1-Pr(E)} = \frac{x}{y}$$
+$$ Pr(E) = \frac{odds(E)}{1+odds(E)}=\frac{x}{x+y}$$
+
+## Generalized Linear Models - characteristics
+- A probability distribution for the outcome
+- A linear model
+$$ \eta = \beta_0 + \beta_1X_1 + \cdots + \beta_pX_p$$
+- A link function
+    $$ g(\mu) = \eta$$
+
+## Logistic Regression
+
+- GLM for binary $\{0,1\}$ data
+- Assumes a bernoulli/binomial distribution for the outcome.
+- Given a set of predictors $X$ (categorical and numeric). 
+- Want to model $E[Y|X] = p$, the probability of success. 
+- Use the logit link function
+$$ logit(p) = \log\left(\frac{p}{1-p}\right) $$
+
+## Logit function
+
+```{r, echo = FALSE}
+tibble(p = seq(.01, .99, .01), 
+       logit = log(p/(1-p))) %>%
+    ggplot(aes(x=p, y=logit)) + 
+    geom_line() + 
+    theme_classic() +
+    labs(x = "p", y="logit(p)")
+    
+```
+
+## Expit Function 
+$$ expit(\eta) = \frac{\exp(\eta)}{1+\exp{\eta}}$$
+```{r, echo = FALSE}
+tibble(x = seq(-10, 10, .1), 
+       expit = exp(x)/(1+exp(x))) %>%
+    ggplot(aes(x=x, y=expit)) + 
+    geom_line() + 
+    theme_classic() +
+    labs(x = bquote(eta), y= bquote("expit"(eta)))
+    
+```
+
+## Logistic Regression Model
+
+$$y_i \sim Binom(n=1, p_i)$$
+$$\eta_i = \mathbf{x_i}^T\beta$$
+$$logit(p_i) = \eta_i$$
+
+$$p_i = \frac{\exp(\mathbf{x_i}^T\beta)}{1+\exp(\mathbf{x_i}^T\beta)}$$
+
+## Donner data
+
+In 1846 the Donner and Reed families left Springfield, Illinois, for California
+by covered wagon. In July, the Donner Party, as it became known, reached
+Fort Bridger, Wyoming. There its leaders decided to attempt a new and
+untested rote to the Sacramento Valley. Having reached its full size of 87
+people and 20 wagons, the party was delayed by a difficult crossing of the
+Wasatch Range and again in the crossing of the desert west of the Great
+Salt Lake. The group became stranded in the eastern Sierra Nevada
+mountains when the region was hit by heavy snows in late October. By
+the time the last survivor was rescued on April 21, 1847, 40 of the 87
+members had died from famine and exposure to extreme cold.
+
+## Donner Data
+```{r, echo = FALSE}
+head(Donner) %>%
+    kable() %>%
+    kable_styling() 
+```
+## Fit a logistic regression model {.smaller}
+
+```{r}
+summary(glm(survived~age+sex+family, data=Donner, family = binomial))
+```
+
+## Check which family is the base category 
+
+```{r}
+unique(Donner$family)
+```
+
+## Fit model without family {.smaller}
+
+```{r, echo = FALSE}
+fit <- glm(survived~age+sex, data=Donner, family = binomial)
+summary(fit)
+```
+
+## Probability of survival for 1 year old girl
+```{r, echo=FALSE}
+tidy(fit) %>% kable(digits = 3) %>% kable_styling()
+```
+$$\begin{align*}
+\log\left(\frac{p}{1-p}\right) =& 1.599 - 0.033*1 - 1.206*0 \\
+\frac{p}{1-p} =& e^{1.565} = 4.787\\
+p =& \frac{4.787}{5.787} = 0.827
+\end{align*}$$
+
+## Prediction
+
+```{r}
+Donner[3,]
+predict(fit, newdata = Donner[3,])
+predict(fit, newdata = Donner[3,], type="response")
+```
+
+## Interpretation of Gender
+
+$$\begin{align*}
+\log\left(\frac{p}{1-p}\right) =& \beta_0 + \beta_1age + \beta_2male \\
+\left(\frac{p}{1-p}\right) =& e^{\beta_0 + \beta_1age + \beta_2male} \\
+\left(\frac{p}{1-p}\right) =& e^{\beta_0}e^{\beta_1age}e^{\beta_2male}
+\end{align*}
+$$
+
+- Odds for female : $e^{\beta_0}e^{\beta_1age}$
+- Odds for male : $e^{\beta_0}e^{\beta_1age}e^{\beta_2}$
+- Odds ratio $\frac{male}{female}$: $e^{\beta_2}$
+
+## Interpretation of Age
+
+- Odds for 10 year old female : $e^{\beta_0}e^{10\beta_1}$
+- Odds for 11 year old female : $e^{\beta_0}e^{11\beta_1}$
+- Odds ratio $\frac{11~year~old}{10~year~old}$ : $\frac{e^{\beta_0}e^{11\beta_1}}{e^{\beta_0}e^{10\beta_1}} = e^{\beta_1}$
+
+- For each 1 year increase in age the odds of surving changes by a factor of $e^{\beta_1}$
+
+
+## Is the model a good fit?
+- Calibration Plots
+- Hosmer-Lemeshow Tests (p < 0.05 indicates not a good fit)
+
+```{r}
+logitgof(Donner$survived, fitted(fit), g = 10)
+```
+## Calibration Plots
+
+```{r, fig.height = 3, fig.width = 4, fig.align = "center"}
+Donner$pred <- predict(fit, type="response")
+cal <- calibration(factor(survived, levels = c(1,0))~pred, data = Donner)
+ggplot(cal, bwidth=2, dwidth = 3)
+```
+
+## Calibration plot by data quantiles
+
+```{r, echo=FALSE}
+expit <- function(x){
+    return(1/(1+exp(-x)))
+}
+
+cal_plot <- function(dat, eqn, nbins, quant = TRUE){
+    # Fit logistic regression models to each split
+    fit <- glm(formula(eqn), data = dat, family = binomial)
+    
+    # Set break points 
+    if (quant){
+        breakpts <- c(0, quantile(expit(predict(fit)), 
+                                  seq(0, 1, length.out = nbins)), 1)
+    } else {
+        breakpts <- seq(0, 1, length.out = nbins+1)
+    }
+    
+    # Get response variable
+    resp <- sym(str_extract(eqn, "[A-Za-z]+"))
+    
+    dat %>% 
+        mutate(
+            # add predictions
+            pred = predict(fit), 
+            # bin predictions into groups
+            pred_group =  as.numeric(as.character(
+                cut(expit(pred), breakpts, labels = breakpts[-1], include.lowest = FALSE)
+            ))) %>%
+        group_by(pred_group) %>%
+        # summarize observed data in groups
+        dplyr::summarise(
+            ct = dplyr::n(),
+            resp_prob = mean(!!resp)
+        ) %>%
+        # make plot
+        ggplot(aes(x = pred_group, y=resp_prob)) +
+        geom_point(
+            aes(size = ct),
+            alpha = 0.3) +
+        geom_abline(slope = 1, intercept = 0) +
+        labs(x = "Predicted Probablity",
+             y = "Observed Frequency",
+             col = NULL) +
+        theme_bw()
+}
+
+cal_plot(dat = Donner, eqn = "survived ~ age + sex", nbins = 10, quant = TRUE)
+```
+
+## Calibration plot including age squared {.smaller}
+
+```{r, echo = FALSE}
+fit_sq <- glm(survived ~ age + I(age^2) + sex, family = binomial, data = Donner)
+tidy(fit_sq) %>% kable(digits = 3) %>% kable_styling()
+logitgof(Donner$survived, fitted(fit_sq), g = 10)
+```
+
+## Compare models using Chi-squared 
+```{r}
+anova(fit, fit_sq, test = "Chisq")
+```
+The model with age squared is a significantly better fit (p < 0.05).
+
+## Calibration plot by quantiles
+```{r}
+cal_plot(dat = Donner, eqn = "survived ~ age + I(age^2) + sex", 
+         nbins = 10, quant = TRUE)
+```
+
+
+## Calibration plot equal bin sizes
+```{r}
+cal_plot(dat = Donner, eqn = "survived ~ age + I(age^2) + sex", 
+         nbins = 10, quant = FALSE)
+```

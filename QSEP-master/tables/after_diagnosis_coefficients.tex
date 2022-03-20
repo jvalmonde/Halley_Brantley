@@ -1,0 +1,27 @@
+%latex.default(parameter_est[, 2:5], title = "", file = "../tables/after_diagnosis_coefficients.tex",     n.cgroup = c(2, 2), cgroup = c("Logistic Model", "Log-normal model"),     colheads = c("Estimate", "Std. Error", "Estimate", "Std. Error"),     rowname = c("ASD", "Asthma", "Cancer", "Cerebral Palsy",         "T1D", "Trauma", "ASD", "Asthma", "Cancer", "Cerebral Palsy",         "T1D", "Trauma"), n.rgroup = c(6, 6), rgroup = c("Women",         "Men"), na.blank = FALSE)%
+\begin{table}[!tbp]
+\begin{center}
+\begin{tabular}{lrrcrr}
+\hline\hline
+\multicolumn{1}{l}{\bfseries }&\multicolumn{2}{c}{\bfseries Logistic Model}&\multicolumn{1}{c}{\bfseries }&\multicolumn{2}{c}{\bfseries Log-normal model}\tabularnewline
+\cline{2-3} \cline{5-6}
+\multicolumn{1}{l}{}&\multicolumn{1}{c}{Estimate}&\multicolumn{1}{c}{Std. Error}&\multicolumn{1}{c}{}&\multicolumn{1}{c}{Estimate}&\multicolumn{1}{c}{Std. Error}\tabularnewline
+\hline
+{\bfseries Women}&&&&&\tabularnewline
+~~ASD&$ 0.086$&$0.017$&&$ 0.007$&$0.018$\tabularnewline
+~~Asthma&$ 0.064$&$0.006$&&$ 0.023$&$0.006$\tabularnewline
+~~Cancer&$ 0.039$&$0.009$&&$-0.026$&$0.009$\tabularnewline
+~~Cerebral Palsy&$ 0.181$&$0.046$&&$ 0.100$&$0.050$\tabularnewline
+~~T1D&$ 0.094$&$0.053$&&$-0.139$&$0.056$\tabularnewline
+~~Trauma&$-0.202$&$0.009$&&$-0.051$&$0.010$\tabularnewline
+\hline
+{\bfseries Men}&&&&&\tabularnewline
+~~ASD&$ 0.062$&$0.017$&&$ 0.036$&$0.021$\tabularnewline
+~~Asthma&$ 0.051$&$0.006$&&$ 0.013$&$0.007$\tabularnewline
+~~Cancer&$ 0.049$&$0.009$&&$ 0.015$&$0.010$\tabularnewline
+~~Cerebral Palsy&$ 0.018$&$0.047$&&$ 0.033$&$0.059$\tabularnewline
+~~T1D&$ 0.151$&$0.054$&&$-0.033$&$0.066$\tabularnewline
+~~Trauma&$ 0.027$&$0.009$&&$ 0.025$&$0.011$\tabularnewline
+\hline
+\end{tabular}\end{center}
+\end{table}

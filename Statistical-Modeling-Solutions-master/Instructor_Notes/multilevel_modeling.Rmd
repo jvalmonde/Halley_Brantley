@@ -1,0 +1,343 @@
+---
+title: "Multilevel Modeling in R"
+author:  Original Notes by Rachell Vinculado, edited by Halley Brantley 
+date:  <h6 style = "color:#595959; font-style:normal; font-size:14px; font-family:Arial, Helvetica, sans-serif">`r format(Sys.Date(), "%B %d, %Y")`</h6> $\hspace{0.05in}$
+output:
+    html_document:
+        theme: readable
+        highlight: kate
+        toc: true
+        toc_depth: 4
+        toc_float:
+            collapsed: no
+        smooth_scroll: no
+        editor_options:
+            chunk_output_type: console
+---
+<style>
+.ambut {
+    margin: 20px;
+    text-align: justify
+}
+</style>
+    
+    
+
+```{r, message = FALSE, include = FALSE}
+library(lme4)
+library(ggplot2)
+library(tidyverse)
+library(arm)
+library(merTools)
+```
+# Partial-Pooling
+
+- Given $J$ groups and $n_j$ individuals within each group
+- Want a best estimate for the mean in each group
+- Could use only the observations in that group
+- Could use the grand mean of all the observations
+- Best estimate is when we use a weighted combination of the grand mean and the observations in a group. 
+
+$$\hat{\alpha}_j^{\text{multilevel}} \approx \frac{\frac{n_j}{\sigma_y^2}\bar{y}_j + \frac{1}{\sigma_{\alpha}^2}\bar{y}_{\text{all}}}{\frac{n_j}{\sigma_y^2} + \frac{1}{\sigma_{\alpha}}}$$
+
+- If there are many observations in the group $\Rightarrow$ group mean has more weight
+- If there are few observation in the group $\Rightarrow$ grand mean has more weight 
+
+# The Data Set
+
+Suppose we are interested in the relationship between pitch and politeness. We want to know if speaking politely lowers our voice pitch. Our data set contains the following variables:
+    
+- subject - our sample individuals
+- gender
+- scenario - different situations like _"asking for a favor"_, _"excusing for coming too late"_. We have a total of 7 different scenarios in our data set
+- attitude - politeness category: polite or informal
+- frequency - voice pitch measured in "Hertz"
+
+
+
+```{r}
+politeness_data = read.csv("https://raw.githubusercontent.com/opetchey/BIO144/master/3_datasets/politeness_data.csv")
+
+```
+
+```{r, include = FALSE}
+str(politeness_data)
+politeness_data$scenario = as.factor(politeness_data$scenario)
+politeness_data = politeness_data %>% drop_na()
+```
+
+```{r}
+head(politeness_data)
+```
+
+We have 6 subjects in our data set, 3 females and 3 males.
+
+```{r}
+politeness_data %>% group_by(subject) %>% count()
+```
+
+Drilling down, we have 2 pitch measurements for each scenario per subject.
+
+```{r}
+politeness_data %>% group_by(subject,scenario) %>% count()
+```
+
+
+# EDA
+
+We look at the distribution of frequency for each of the subjects.
+
+```{r, echo = FALSE}
+#Subject
+theme_set(theme_bw(base_size = 12, base_family = "")) 
+
+Model.Plot.Subject <-ggplot(data = politeness_data, aes(subject,frequency))+   
+    geom_boxplot(aes(group = subject)) +  
+    xlab("Subjects")+ylab("Mean Pitch (Hertz)")+    
+    theme(legend.position = "none")   
+
+Model.Plot.Subject
+
+
+```
+
+Subject F1 to F3 are female subjects. Subjects M3 to M7 are male subjects. We can immediately see that males have lower voices than females (as is to be expected). But on top of that, within the male and the female groups, we see lots of individual variation, with some people having relatively higher values for their sex and others having relatively lower values.
+
+```{r, include = FALSE}
+politeness_data %>% filter(!is.na(frequency)) %>%  group_by(gender,attitude) %>% summarise(mean(frequency))
+boxplot(frequency~ gender, politeness_data)
+boxplot(frequency~ attitude, politeness_data)
+
+politeness_data %>% filter(!is.na(frequency)) %>%  group_by(gender) %>% summarise(mean(frequency))
+politeness_data %>% filter(!is.na(frequency)) %>%  group_by(attitude) %>% summarise(mean(frequency))
+```
+
+
+We now look at the distribution of frequency for the attitude for both gender.
+```{r, echo = FALSE}
+#Gender and attitude
+boxplot(frequency~attitude * gender, col = c("white", "lightgray"), politeness_data)
+```
+
+In both cases, the median line is lower for the polite than for the informal condition. However, there may be a bit more overlap between the two politeness categories for males than for females.
+
+For each scenario:
+```{r, echo = FALSE}
+#Scenario
+theme_set(theme_bw(base_size = 12, base_family = "")) 
+
+Model.Plot.Scenario <-ggplot(data = politeness_data, aes(scenario,frequency))+   
+    geom_boxplot(aes(group = scenario)) +  
+    xlab("Scenario")+ylab("Mean Pitch (Hertz)")+    
+    theme(legend.position = "none")   
+
+Model.Plot.Scenario
+
+
+```
+
+The variation between items isn’t as big as the variation between subjects – but there are still noticeable differences, and we better account for them in our model!
+
+# Can we use classical regression?
+    
+So the design for this is we took multiple measures per subject. That is each subject gave multiple polite responses and multiple informal responses. If we go back to the assumptions of the linear model, we can immediately see that this would violate the independence assumption: __Multiple responses from the same subject cannot be regarded as independent from each other__. Every person has a slightly different voice pitch, and this is going to be an idiosyncratic factor that affects all responses from the same subject, thus rendering these different responses inter-dependent rather than independent.
+
+The way we’re going to deal with this situation is __to add a random effect for subject__. This allows us to resolve this non-independence by assuming a different _“baseline”_ pitch value for each subject. We can model these individual differences by assuming different __random intercepts__ for each subject. 
+
+But we’re not done yet. There’s an additional source of non-independence that needs to be accounted for: __We had different scenarios__. One scenario, for example, is an “asking for a favor” scenario. Here, subjects had to imagine asking a professor for a favor (polite condition), or asking a peer for a favor (informal condition). Another scenario is an “excusing for coming too late” scenario, which is similarly divided between polite and informal. In total, there are 7 such different scenarios.
+
+Similar to the case of by-subject variation, we also expect by-scenario variation. For example, there might be something special about “excusing for coming too late” which leads to overall higher pitch (maybe because it’s more embarrassing than asking for a favor), regardless of the influence of politeness. And whatever it is that makes one scenario different from another, the responses of the different subjects in the experiment might similarly be affected by this random factor that is due to scenario-specific idiosyncrasies. That is, if “excusing for coming to late” leads to high pitch (for whatever reason), it’s going to do so for subject 1, subject 2, subject 3 and so on. Thus, the different responses to one scenario cannot be regarded as independent, or, in other words, there’s something similar to multiple responses to the same scenario – even if they come from different people. Again, if we did not account for these interdependencies, we would violate the independence assumption.
+
+
+# Fit a Multilevel Model
+
+Our unit of observation are the voice measurements. Our groups refers to the subjects in which the units are contained.
+
+Using a multi-level model allows us to separate the within-group effects from the between-group effects.
+
+
+# Unconditional means or random intercepts model
+
+The first model fit in almost any multilevel context should be the _unconditional means model_, also called a _random intercepts model_. In this model, there are no predictors at either level; rather, the purpose of the unconditional means model is to __assess the amount of variation at each level-- to compare variability within subject to variability between subjects.__
+
+
+```{r }
+Null.subject <- lmer(frequency ~ 1 # This simply means frequency predicted by the intercept
+                   + (1|subject), # each subject gets their own intercept 
+                   data=politeness_data, REML = TRUE)
+summary(Null.subject)
+```
+
+
+We examine the __intra-class correlation (ICC)__. It is the correlation between two observations within the same cluster. _The higher the correlation within the clusters (ie. the larger the ICC) the lower the variability is within the clusters and consequently the higher the variability is between the clusters._ It answers the question, “How much does my Level 2 predict the total variance of my study?” The formula for ICC is : 
+    ICC = Between-person variability / Total variability.
+
+
+```{r}
+sigmas <- arm::sigma.hat(Null.subject)$sigma
+# Calculate ICC
+icc <- sigmas$subject^2/(sigmas$subject^2 + sigmas$data^2)
+icc
+```
+
+Thus, 81% of the total variability in frequencies (voice pitch) are attributable to differences among subjects. In this particular model, we can also say that the average correlation for any pair of responses from the same individual is a strongly high 0.81.
+
+- As ICC approaches 0, responses from an individual are essentially independent and accounting for the multilevel structure of the data becomes less crucial.
+- As ICC approaches 1, repeated observations from the same individual essentially provide no additional information and accounting for the multilevel structure becomes very important.
+
+
+## Run the full model
+```{r}
+politeness.model = lmer(frequency ~ attitude +  gender
+                        +(1|subject) + (1|scenario),
+                        data=politeness_data)
+summary(politeness.model)
+```
+
+### Interpretation
+
+For fixed effects:
+- Intercept = 256.846 = The estimated mean frequency for informal attitude is 256.846 for females
+- Polite Attitude = -19.721 = The estimated mean frequency for those who speak politely is 19.7 hertz lower than those who speak informally
+- Gender = -108.516 = Males have lower frequency than females and the difference is 109 hertz
+
+For random effects:
+    
+- Residual = 645.9 = the variance in within-person deviations
+- Scenario = 219.5 = the variance in between-scenario deviations in frequencies
+- Subject = 615.6 = the variance in between-subject deviations in frequencies
+
+
+## Comparing two models
+
+To show this, let's see if attitude significantly affects the voice pitch of a person. We will compare a full model (with the fixed effects in question) against a reduced model without the effects in question. We will conclude that a fixed effect is significant if the difference between the likelihood of these two models in significant.
+
+First, we need to construct the null model (the model without the factor that we are interested in)
+
+```{r}
+politeness.null = lmer(frequency ~ gender
+                  +(1|subject) + (1|scenario),
+                data=politeness_data, REML = FALSE)
+
+politeness.full = lmer(frequency ~ gender+attitude
+                  +(1|subject) + (1|scenario),
+                data=politeness_data, REML = FALSE)
+```
+
+
+We will perform the likelihood ratio test using the anova () function:
+```{r}
+anova(politeness.null, politeness.full)
+```
+
+
+
+# Random slopes versus random intercepts
+
+```{r}
+coef(politeness.model)
+```
+
+We see that each scenario and each subject is assigned a different intercept. Note that the fixed effects are all the same for all subjects and items. This model is what we called a __random intercept model__. In this model, we account for baseline-differences in pitch, but we assume that whatever the effect of politeness is, it's going to be the same for all subjects and scenrios.
+
+But is that a valid assumption? The effect of politeness might be different for different scenarios. Likewise, the effect of politeness might be different for different subjects. So, what we need is a __random slope model__, where subjects and items are not only allowed to have differing intercepts, but where they are also allowed to have different slopes for the effect of politeness. This is how we would do this in R:
+    
+```{r}
+politeness.model1 = lmer(frequency ~ attitude + gender + 
+                             (1+attitude|subject) +(1+attitude|scenario),
+                         data=politeness_data,REML=FALSE)
+
+```
+
+Note that the only thing that we changed is the random effects, which now look a little more complicated. The notation “(1+attitude|subject)” means that you tell the model to expect differing baseline-levels of frequency (the intercept, represented by 1) as well as differing responses to the main factor in question,
+which is “attitude” in this case. You then do the same for scenarios.
+
+```{r}
+coef(politeness.model1)
+```
+
+
+Now, the column with the by-subject and by-item coefficients for the effect of politeness (“attitudepol”) is different for each subject and item. Note, however, that it’s always negative and that many of the values are quite similar to each other. This means that despite individual variation, there is also consistency in how politeness affects the voice: _for all of our speakers, the voice tends to go down when speaking politely, but for some people it goes down slightly more so than for others._
+
+
+# Model Comparison (Random-intercepts vs. Random Intercept, Random Slope)
+
+
+```{r}
+#Random-intercept model
+mod.1 = lmer(frequency ~ gender+attitude
+             +(1|subject) + (1|scenario),
+             data=politeness_data, REML = FALSE)
+
+#Random-intercept,Random-slope model
+mod.2 = lmer(frequency ~ gender+attitude
+             + (1+attitude|subject) + (1+attitude|scenario),
+             data=politeness_data, REML = FALSE)
+
+#Compare the two models
+anova(mod.1,mod.2)
+
+
+```
+
+
+# Testing the Assumptions
+
+
+## Linearity and Homogeneity of Variance
+    
+```{r}
+#For level-1 residuals
+plot(politeness.model1)
+```
+
+This residual plot does not indicate any deviations from a linear form. It also shows relatively constant variance across the fitted range. 
+
+
+## Normality of Residuals
+```{r}
+# checking the normality of conditional (level-1) residuals:
+qqnorm(resid(politeness.model1), main="Q-Q plot for conditional residuals")
+qqline(resid(politeness.model1))
+
+
+# checking the normality of the random effects (here random intercept):
+qqnorm(ranef(politeness.model1)$subject$`(Intercept)`, 
+       main="Q-Q plot for the random intercept")
+qqline(ranef(politeness.model1)$subject$`(Intercept)`)
+```
+
+For the conditional residuals, there is some deviation from the expected normal line towards the tails, but overall the line looks straight and therefore pretty normal and suggests that the assumption is not violated.
+
+## Independence
+One of the main reasons we moved to multilevel models rather than just working with linear models was to resolve non-independencies in our data. However, multilevel models can still violate independence if you're missing important fixed or random effects. So, for example, if we analyzed our data with a model that didn't include the random effect "subject", then our model would not "know" that there are multiple responses per subject. This amounts to a violation of the independence assumption. So we have to choose our fixed effects and random effects carefully, and always try to resolve non-independence
+
+
+
+# Predictions
+
+```{r}
+x <- model.matrix(frequency ~ gender + attitude, politeness_data)
+beta <- fixef(mod.1)
+beta_r <- ranef(mod.1)
+politeness_data[1,]
+x[1,names(beta)]%*%beta + 
+    beta_r$scenario$`(Intercept)`[1] + 
+    beta_r$subject$`(Intercept)`[1] 
+
+predict(mod.1, newdata = politeness_data[1,], allow.new.levels = TRUE)
+
+new_subject <- politeness_data[1,] 
+new_subject$subject <- "F10"
+new_subject$scenario <- 8
+predict(mod.1, newdata = new_subject, allow.new.levels = TRUE)
+
+x[1,names(beta)]%*%beta
+
+predictInterval(mod.1, newdata = new_subject)
+predictInterval(mod.1, newdata=politeness_data[1,])
+```
+
+
+
+

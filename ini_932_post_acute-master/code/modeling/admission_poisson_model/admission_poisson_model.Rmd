@@ -1,0 +1,262 @@
+---
+title: "Number of Admissions in 2018 (Poisson Model)"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    
+---
+
+```{r setup, include = FALSE}
+## load packages
+library(data.table)
+library(ggplot2)
+library(drake)
+library(kableExtra)
+library(countreg)
+library(skimr)
+devtools::load_all("../../../savvyR")
+
+## loadd processesd files
+loadd(df_mdl)
+loadd(plt_model_coefs)
+loadd(rmse_df)
+loadd(conf_mt_cutoff0_test)
+loadd(conf_mt_cutoff0_train)
+loadd(conf_mt_cutoff1)
+loadd(conf_mt_cutoff2)
+
+model_names <- names(plt_model_coefs)
+
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+# Function to be used for dynamic tabsetting
+catHeader = function(text = "", level = 3) {
+  cat(paste0("\n\n", 
+             paste(rep("#", level), collapse = ""), 
+             " ", text, "\n"))
+}
+
+```
+
+
+
+## Population of Interest Characteristics
+
+```{r, fig.height = 4, fig,width = 6}
+ggplot(df_mdl, aes(admit_counts)) +
+  geom_histogram(bins = 50) + 
+  theme_rnd()
+```
+
+```{r, eval = FALSE}
+df_mdl[,eq_0 := ifelse(admit_counts == 0, 1, 0)]
+df_mdl[,.N,by=.(age_bin, eq_0)][order(age_bin)]
+```
+
+```{r, eval=FALSE}
+loadd(frail_cols)
+lapply(df_mdl[,..frail_cols], table)
+```
+
+```{r}
+df_mdl[,.(age_bin_ = cut(age_2017, seq(65, 110, by = 5), include.lowest = TRUE))] %>%  
+  .[,.N, age_bin_] %>% 
+  .[,pct := N/length(unique(df_mdl$savvy_pid)) * 100] %>% 
+  .[] %>% 
+  kable() %>% 
+  kable_styling(full_width = FALSE)
+  
+  
+
+```
+
+```{r}
+df_mdl[,.N, gender][,pct := N/length(unique(df_mdl$savvy_pid))][]
+
+```
+
+```{r}
+loadd(frail_cols)
+melt(df_mdl[,..frail_cols][,lapply(.SD, sum)])[,pct := value/length(unique(df_mdl$savvy_pid)) * 100][] %>% 
+  kable() %>% 
+  kable_styling(full_width = FALSE)
+```
+
+```{r}
+loadd(cc_cols)
+melt(df_mdl[,..cc_cols][,lapply(.SD, sum)])[,pct := value/length(unique(df_mdl$savvy_pid)) * 100][order(-value)] %>% 
+  .[1:10] %>% 
+  kable() %>% 
+  kable_styling(full_width = FALSE)
+```
+
+
+<br>
+
+
+## Model Coefficients
+### Poisson Model (No Overdispersion) {.tabset}
+```{r, results = 'asis', echo = F, fig.width = 10, fig.height = 8}
+idx <- grep("poisson", names(plt_model_coefs))
+
+for (i in 1:length(idx)) 
+{
+  catHeader(model_names[idx[i]], 4)
+  print(plt_model_coefs[[idx[i]]]$count)
+}
+```
+
+### Poisson Model (With Overdispersion) {.tabset}
+
+```{r fig.width = 10, fig.height = 8, results = 'asis'}
+
+idx <- grep("pois w/ disp", names(plt_model_coefs))
+for (i in 1:length(idx)) 
+{
+  catHeader(model_names[idx[i]], 4)
+  print(plt_model_coefs[[idx[i]]]$count)
+}
+
+```
+
+### Zero-inlated models (count model) {.tabset}
+
+```{r, fig.width = 10, fig.height = 8, results = 'asis'}
+
+idx <- grep("zero inf|zif", names(plt_model_coefs))
+for (i in 1:length(idx)) 
+{
+  catHeader(model_names[idx[i]], 4)
+  print(plt_model_coefs[[idx[i]]]$count)
+}
+
+```
+
+## Model Checking
+
+### Rootograms {.tabset}
+```{r, fig.width = 8, fig.height = 4, results = 'asis', eval = FALSE}
+
+for (i in 1:length(model_list_all))
+{
+   
+  fm <- model_list_all[[i]]$family$family
+  nl <- is.null(fm)
+  cl <- class(model_list_all[[i]])
+  
+  if("zeroinfl" %in% cl)
+  {
+    catHeader(model_names[i], level = 4)
+    rootogram(model_list_all[[i]], main = "")
+    
+  }
+  
+  if (!nl)
+  {
+     if (fm != 'quasipoisson')
+    {
+      catHeader(model_names[i], level = 4)
+      rootogram(model_list_all[[i]], main ="")
+      
+    }
+    
+  }
+  
+}
+
+
+```
+
+
+
+## Model Performance Evaluation {.tabset}
+
+### Root-mean squared error
+```{r, fig.width = 6, fig.height = 4}
+setorderv(rmse_df, 'RMSE')
+rmse_df[,RMSE := round(RMSE, 3)]
+rmse_df %>% 
+kable() %>% 
+  kable_styling(full_width = F)
+```
+
+<br>
+
+### % Precision and Recall {.tabset}
+
+Positive classes are based on > count threshold predictions, and are all based on test data.
+
+```{r, echo = F}
+get_stats = function(cf_list, attr, value_name)
+{
+melt(as.data.table(data.frame(
+  lapply(cf_list, function(x) x$byClass[attr]),
+  check.names = FALSE
+  )),
+  value.name = value_name, 
+  variable.name = "model_type")
+  
+}
+
+
+pr_recall_kable = function(cf_list)
+{
+  ppv_df <- get_stats(cf_list, "Pos Pred Value", "ppv")
+  recall_df <- get_stats(cf_list, "Recall", "recall")
+  setorder(ppv_df, -ppv)
+  setorder(recall_df, -recall)
+  
+  stats_df <- merge(ppv_df, recall_df, by = "model_type")
+  stats_df[,c("ppv", "recall") :=  lapply(.SD, function(x) round(x * 100, 2)), 
+           .SDcols = c("ppv", "recall")]
+  stats_df %>% 
+    kable() %>% 
+    kable_styling(full_width = F)
+}
+
+
+```
+#### > 0 counts
+
+```{r}
+pr_recall_kable(conf_mt_cutoff0_test)
+
+```
+
+#### > 1 counts
+
+```{r}
+pr_recall_kable(conf_mt_cutoff1)
+
+```
+
+#### > 2 counts
+```{r}
+
+pr_recall_kable(conf_mt_cutoff2)
+```
+
+### Positive Predictions {.tabset}
+
+#### Train (> 0 counts)
+
+```{r}
+melt(as.data.table(lapply(conf_mt_cutoff0_train, function(x)
+  round(sum(x$table[1, ]) / sum(x$table) * 100, 3))), variable.name = "model_type", 
+  value.name = "% Positive Predictions") %>% 
+  kable() %>% 
+  kable_styling(full_width = F)
+```
+
+
+#### Test ( > 0 counts)
+
+```{r}
+melt(as.data.table(lapply(conf_mt_cutoff0_test, function(x)
+  round(sum(x$table[1, ]) / sum(x$table) * 100, 3))), variable.name = "model_type", 
+  value.name = "% Positive Predictions") %>% 
+  kable() %>% 
+  kable_styling(full_width = F)
+```

@@ -1,0 +1,218 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%  This Beamer template was created by Cameron Bracken.
+%%  Anyone can freely use or modify it for any purpose
+%%  without attribution.
+%%
+%%  Last Modified: January 9, 2009
+%%
+
+\documentclass[xcolor=x11names,compress]{beamer}
+
+%% General document %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+\usetikzlibrary{decorations.fractals}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%% Beamer Layout %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\useoutertheme[subsection=false,shadow]{miniframes}
+\useinnertheme{default}
+\usefonttheme{serif}
+\usepackage{palatino}
+
+\setbeamerfont{title like}{shape=\scshape}
+\setbeamerfont{frametitle}{shape=\scshape}
+
+\setbeamercolor*{lower separation line head}{bg=DeepSkyBlue4} 
+\setbeamercolor*{normal text}{fg=black,bg=white} 
+\setbeamercolor*{alerted text}{fg=red} 
+\setbeamercolor*{example text}{fg=black} 
+\setbeamercolor*{structure}{fg=black} 
+
+\setbeamercolor*{palette tertiary}{fg=black,bg=black!10} 
+\setbeamercolor*{palette quaternary}{fg=black,bg=black!10} 
+
+\renewcommand{\(}{\begin{columns}}
+\renewcommand{\)}{\end{columns}}
+\newcommand{\<}[1]{\begin{column}{#1}}
+\renewcommand{\>}{\end{column}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}
+\title{QSEP Research Update}
+%\subtitle{SUBTITLE}
+\author{
+	Halley Brantley\\
+	{\it Savvy Sherpa}\\
+}
+\date{
+	\begin{tikzpicture}[decoration=Koch curve type 2] 
+	\draw[DeepSkyBlue4] decorate{ decorate{ decorate{ (0,0) -- (3,0) }}}; 
+	\end{tikzpicture}  
+	\\
+	\vspace{1cm}
+	\today
+}
+\titlepage
+\end{frame}
+
+\section{\scshape Overview}
+
+\begin{frame}{Research Questions}
+Original
+\begin{itemize}
+	\item Can we identify a dataset containing the pediatric illness populations of interest and their immediate family members? 
+	\item Can we quantify the outcomes of interest and their relationship to the hypothesized mediating factors? 
+	\item Do we see any significant secondary effects of pediatric illness on family members, in comparison to a sensibly-defined control group? 
+\end{itemize}
+Updated 
+\begin{itemize}
+	\item Do we see a difference in adult family member spending before and after a child is diagnosed?
+\end{itemize}
+\end{frame}
+
+\section{\scshape Data}
+
+\begin{frame}{Dataset - from data team}
+\begin{itemize}
+	\item Count of sick children (under 24) in our dataset:  275,819
+	\item Total member count (family members \& sick children combined): 968,471
+	\item Total family count: 237,829
+	\item Dataset covers year 2014-2016 and includes months since diagnosis, median household income, distance to PCP. 
+	\item Between 65-70\% of members in each year were enrolled for 12 months
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Number of Children Under 16 with each condition}
+\begin{itemize}
+	\item Total sick children under 16: 159,792 
+	\item Asthma:  99,065
+	\item Autism (ASD): 10,966 
+	\item Cancer: 29,572
+	\item Cerebral Palsy: 1,802
+	\item Type 1 Diabetes (T1D): 2,089
+	\item Traumatic Event: 29,159
+	\item Multiple Conditions: 12,142
+\end{itemize}	
+\end{frame}
+
+\begin{frame}
+Number of children under 16 with each condition, enrolled for more than 3 months, and for whom we have at least one month of spend data before diagnosis. 
+\begin{itemize}
+	\item Total sick children under 16: 136,791
+	\item Unique Families: 122,588 
+	\item Asthma:  87,872
+	\item Autism (ASD): 8,732
+	\item Cancer: 27,466
+	\item Cerebral Palsy: 1,440
+	\item Type 1 Diabetes (T1D): 1,434
+	\item Traumatic Event: 22,313
+	\item Multiple Conditions: 11,756
+\end{itemize}	
+\end{frame}
+
+\begin{frame}{Data Cleaning }
+\begin{itemize}
+	\item To identify parents/guardians in the household used the criteria:
+		\begin{itemize}
+			\item Same household as sick child
+			\item Older than 15
+			\item At least 15 years older than the sick child 
+			\item No more than 60 years older than the sick child
+			\item Within 15 years of the age of the oldest member of the household
+		\end{itemize} 
+	\item Typically 1 or 2 members per household that meet these criteria, although several households have 3. 
+\end{itemize}
+\end{frame}
+
+
+\section{\scshape Modeling}
+
+\begin{frame}{Models}
+\begin{itemize}
+	\item Goal: model monthly spend per adult family member before and after diagnosis.
+	\item Model 1: Treat spend as binary and model probability of non-zero spend
+	\item Model 2: Look at only positive values of spend and model log total allowed amount. 
+	\item Models were fit using generalized additive models to incorporate non-linear effects
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Predictors}
+\begin{itemize}
+\item Non-linear Predictors:  
+\begin{itemize}
+	\item Adult's age
+	\item Sick child's age
+	\item Median household income
+\end{itemize}
+\item Linear predictors:
+\begin{itemize}
+	\item Time
+	\item RAF categories 
+	\item Plan Type: Gated HMO, Choice Plus, Select Plus, Choice, Other
+	\item Indicator of male
+	\item Indicator of only one adult on the plan that meets the above criteria (no other parents on plan)
+	\item Indicator of other children on the plan
+	\item Interaction between single adult and other children
+	\item Interaction between single adult and male
+\end{itemize}  
+\end{itemize}
+\end{frame}
+
+\begin{frame}
+Predictors of interest:
+\begin{itemize}
+	\item Indicator of after child's diagnosis
+	\item Interaction between after diagnosis and male
+\end{itemize}
+\end{frame}
+
+\section{\scshape Results}
+
+
+
+\begin{frame}
+Factor increase in odds of positive monthly spend
+\tiny
+	\input{../tables/oddsFactors.tex}
+	"-" indicates coefficient was not significant. 
+\end{frame}
+
+\begin{frame}
+Effect of a diagnosis on men and women's odds of monthly spend
+\input{../tables/Logistic_afterdiag.tex}
+\end{frame}
+
+\begin{frame}
+Factor increase in amount of monthly spend
+\tiny
+\input{../tables/spendFactors.tex}
+"-" indicates coefficient was not significant. 
+\end{frame}
+
+\begin{frame}
+Effect of a diagnosis on amount of men and women's monthly spend
+\input{../tables/Spend_afterdiag.tex}
+\end{frame}
+
+\begin{frame}
+Combined Model - diagnosis terms
+\input{../tables/combined_model_1.tex}
+\end{frame}
+
+\begin{frame}
+Combined Model - other terms
+\tiny
+\input{../tables/combined_model_2.tex}
+\end{frame}
+\end{document}

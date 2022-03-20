@@ -1,0 +1,498 @@
+---
+title: "Number of Admissions in 2019 (non elective admissions, negative Binomial)"
+output: 
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: haddock
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(kableExtra)
+library(data.table)
+library(tidyverse)
+library(glue)
+library(drake)
+library(devtools)
+library(here)
+library(caret)
+devtools::load_all("~/savvyR")
+devtools::load_all("~/ini_620_home_complex_risk_strat/homeriskstratR")
+cache <- new_cache(path = "/storage_pool/cache/")
+
+options(httr_oauth_cache = "~/.httr-oauth", httr_oob_default = TRUE)
+options(scipen = 20)
+```
+
+
+```{r load data}
+load('~/bkt_inv_post_acute/metrics_2018.Rdata')
+load('~/bkt_inv_post_acute/metrics_2018_lag.Rdata')
+load('~/bkt_inv_post_acute/data_2018.Rdata')
+loadd(models_w_ckd_stages, cache = cache)
+
+start_dt <- '2018-01-01'
+end_dt <- '2018-12-31'
+pid <- 'research-01-217611'
+DB <-  "foc_interoperability.ini_1085"  
+```
+
+```{r functions, echo=FALSE}
+source(here::here("code/modeling/admission_negbinom_model", "mod_metrics.R"))
+
+metrics_table <- function(data, perc){
+data %>% 
+  filter(target_perc == perc) %>%
+  select(-target_perc) %>% 
+  mutate_at(vars(-c(1:5)), ~round(.,2)) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c('striped', 'hover', 'condensed')) %>% 
+  collapse_rows(1, valign = 'middle') 
+}
+
+make_metrics_table = function(admit_cnt_df, pids){
+  
+  df <- admit_cnt_df %>% filter(savvy_pid %in% pids) %>% 
+    dplyr::select(savvy_pid, admit_counts,snf_admits,
+                  total_spend, hosp_spend, snf_spend, mm_2019, date_of_death) %>% 
+    filter(mm_2019 > 0) %>% 
+    mutate(death_flag = ifelse(is.na(date_of_death)| date_of_death > '2020-01-01', 0, 1)) 
+  
+  # compute metrics for the predicted members 
+  list(df %>% 
+    summarise(PMPM_total = sum(total_spend, na.rm = T)/(sum(mm_2019)),
+              PMPM_hosp = sum(hosp_spend, na.rm = T)/(sum(mm_2019)),
+              PMPM_snf = sum(snf_spend, na.rm = T)/(sum(mm_2019)),
+              admits_1k = (sum(admit_counts,na.rm = T)/(n_distinct(savvy_pid)))*1000,
+              snf_admits_1k = (sum(snf_admits,na.rm = T)/(n_distinct(savvy_pid)))*1000,
+              mortality_rate = sum(death_flag)/(n_distinct(savvy_pid))))
+  
+}
+
+# function to get columns for metrics of identified frail population
+
+string_serious <- select(data_2018, contains('serious')) %>% names() %>% toString()
+
+get_metric_vars_query <- function(DB, pop_query, tbl_name, year_nbr, with_lag = F){
+  serious_year <- if(with_lag == F){
+    year_nbr
+  } else {noquote(paste0(year_nbr,10))}
+  
+  glue("SELECT savvy_pid, admit_counts, mm_{year_nbr + 1}, total_spend, 
+               hosp_spend, snf_spend, snf_admits, date_of_death, 
+               age_{year_nbr}, gender,
+               frail_Falls_and_Fractures,
+               frail_Pressure_Ulcers_and_Weight_Loss, frail_Incontinence, frail_Anxiety_and_Depression,
+               frail_Mobility_Problems, frail_Dependence_and_Care,frail_Dementia_and_Delirium, {noquote(string_serious)}
+        FROM 
+        (SELECT * 
+        FROM `{DB}_{tbl_name}`
+        WHERE savvy_pid IN (SELECT savvy_pid FROM ({pop_query})) 
+        AND age_{year_nbr} >= 65) as a
+        
+        LEFT JOIN (
+        SELECT savvy_pid, {noquote(string_serious)}
+        from {DB}_serious_conditions_{year_nbr}
+        ) as b
+        
+        USING (savvy_pid)
+      ")
+}
+
+add_race <- function(q_ids, pop_df){
+  
+  ## q_ids = table or query with savvy_pid
+  ## pop_df = demographic table of identified population
+  
+  race <- load_bq(pid, query = race_cms(q_ids))
+
+  cols <- colnames(race)[endsWith(colnames(race), '_flag') == TRUE]
+  
+  race <- race %>% dplyr::select(savvy_pid,cols) %>% 
+    tidyr::gather(race, flag, -savvy_pid) %>% 
+    filter(flag == 1) %>% 
+    full_join(data.frame(savvy_pid = pop_df$savvy_pid))
+
+  race$race[is.na(race$race)] <- 'no_data'
+
+  ## duplicates with inconsistent races
+  dups <-  race %>% 
+    group_by(savvy_pid) %>% 
+    filter(n()>1) %>% 
+    arrange(savvy_pid) %>% 
+    dplyr::select(savvy_pid) %>% 
+    distinct()
+  
+  inconsistent_race <- data_frame(savvy_pid = as.vector(dups$savvy_pid),
+    race_dup = 'inconsistent_data')
+  
+  race_df = full_join(race, inconsistent_race, by = "savvy_pid") %>% 
+    mutate(race_final = ifelse(is.na(race_dup), race, race_dup)) %>% 
+    dplyr::select(savvy_pid, race_final) %>% distinct()
+  
+  race_df$race_final <- gsub("_flag", "", race_df$race_final)
+  
+  final_data <- left_join(pop_df, race_df)
+}
+
+# preprocessing function for admit count dataframes
+preprocess_data = function(df)
+{
+  # create hcc_over5_flag
+  df <- df %>% 
+    mutate(hcc_over5_flag = ifelse(hcc_count > 5, 1,0),
+           prior_admit_1plus = ifelse(admit_6mos_prior_counts >= 1, 1, 0),
+           prior_admit_2plus = ifelse(admit_6mos_prior_counts >= 2, 1, 0))
+  
+  # vars not included
+  vars_not_included <- c("hosp_spend", "snf_spend", "total_spend", "snf_admits",
+                         "date_of_death", "mm_2019", "gender", "hcc_count")
+  df <- df %>% 
+    mutate_if(!(names(.) %in% vars_not_included), ~ifelse(is.na(.), 0, .))
+  
+  df$gender <- factor(df$gender)
+  df$age_cat <- cut(
+    df$age_2018,
+    breaks = c(65, 70, 75, 80, max(df$age_2018) +
+                 1),
+    labels = c("65-69", "70-74", "75-79", "80+"),
+    right = F
+  )
+  dmy <- dummyVars(~ age_cat, data = df)
+  dmy_df <- predict(dmy, newdata = df)
+  colnames(dmy_df) <-  make.names(colnames(dmy_df))
+  
+  df <- cbind(df, dmy_df)
+  
+  # use LACE index LOS cutoffs as breaks
+  df$hosp_cat <- cut(
+    df$hosp_days,
+    breaks = c(0, 1, 2, 3, 4,7, 14, max(df$hosp_days) +
+                 1),
+    labels = c("0", "1", "2", "3", "4-6", "7-13", ">=14"),
+    right = F
+  )
+  
+  
+  # breaks based on medicare coverage days
+  df$snf_cat <- cut(
+    df$snf_days,
+    breaks = c(0, 21, 101, max(df$snf_days) +
+                 1),
+    labels = c("0-20", "21-100", ">100"),
+    right = F
+  )
+  
+  #filter out members with more than 200 ip days
+  # df <- df %>% 
+  #   filter(hosp_days <= 200 & snf_days <= 200)
+  return(df)
+
+}
+```
+
+# {.tabset .tabset-fade}
+## Data from 2018 - 2019
+### Using % positive predicted dependent threshold {.tabset .tabset-fade}
+
+#### 5% positive predicted
+```{r}
+metrics_table(metrics_uniform_perc18, 0.05)
+```
+
+
+#### 2% positive predicted
+```{r}
+metrics_table(metrics_uniform_perc18, 0.02)
+```
+
+
+### Threshold from cutoff > 0 (% positive predicted dependent) {.tabset .tabset-fade}
+
+#### 5 % positive predicted
+```{r}
+metrics_table(metrics_fixed_0_18, 0.05)
+```
+
+#### 2% positive predicted
+```{r}
+metrics_table(metrics_fixed_0_18, 0.02)
+```
+
+## Data from 2018, simulated lag, data up to Oct. 2018
+### Using % positive predicted dependent threshold {.tabset .tabset-fade}
+
+#### 5% positive predicted
+```{r}
+metrics_table(metrics_lag_uniform_perc18, 0.05)
+```
+
+
+#### 2% positive predicted
+```{r}
+metrics_table(metrics_lag_uniform_perc18, 0.02)
+```
+
+
+### Threshold from cutoff > 0 (% positive predicted dependent) {.tabset .tabset-fade}
+
+#### 5 % positive predicted
+```{r}
+metrics_table(metrics_lag_fixed_0_18, 0.05)
+```
+
+#### 2% positive predicted
+```{r}
+metrics_table(metrics_lag_fixed_0_18, 0.02)
+```
+
+## Other Algorithms
+
+```{r, eval = FALSE}
+# MA population 2018 ------------------------------------------------------
+# continuously enrolled members in 2018
+cohort_ma <- glue("
+   SELECT
+     distinct savvy_pid
+   FROM
+     foc_interoperability.ini_1085_pop_ce_2018
+               
+")
+
+# pop_2018 <- load_bq(pid, cohort_ma) 
+
+
+
+######## NaviHealth population
+# first part of table name
+db_ma <- 'foc_interoperability.ini_1085_ma_2018'
+
+claims_ma <- miniov_medical(start_dt, end_dt, cohort_ma)
+
+hcc_table_ma <- glue("{db_ma}_cms_raf")
+
+## frail, medically complex cohort using NaviHealth criteria
+q_navi_ma <- 
+  navi_frail_pop(
+    hcc_table_ma,
+    claims_ma
+  )
+
+# load navihealth population
+pop_navi_2018 <- load_bq(pid, 
+                         query = get_metric_vars_query(DB, q_navi_ma, year_nbr = 2018,
+                                                       tbl_name = "admission_counts_features_non_elect_2018_2019"))
+
+pop_navi_2018 <- add_race(q_navi_ma, pop_navi_2018) %>% distinct()
+
+```
+
+```{r}
+######## 620 population
+ini_620_population_codes <- read_csv("../../../data/ini_620_population_codes.csv")
+
+## get 2018 cohort
+q_data_620 <- get_cohort(start_dt = '2018-01-01', ini_620_codes = ini_620_population_codes)
+
+data_620 <- load_bq(pid, q_data_620)
+
+# required columns for identified 620 population
+pop_620_2018 <- load_bq(pid, 
+                        query = get_metric_vars_query(DB, q_data_620,  year_nbr = 2018,
+                                                      tbl_name = "admission_counts_features_non_elect_2018_2019"))
+
+
+pop_620_2018 <- add_race(q_data_620, pop_620_2018)
+```
+
+```{r}
+query_2018 <-  glue("SELECT *
+              FROM 
+              (
+                SELECT *
+                FROM
+                  `{DB}_admission_counts_features_non_elect_2018_2019`
+              ) AS a
+              LEFT JOIN (
+                SELECT *
+                FROM
+                  `{DB}_frail_feats_by_quarter_2018`) AS b
+              USING
+                (savvy_pid)
+              LEFT JOIN (
+                SELECT * EXCEPT (total_raf)
+                FROM
+                  `{DB}_serious_conditions_2018`) as c
+              USING (savvy_pid)")
+
+# data_2018 <- load_bq(pid, query_2018)
+names(data_2018)[colnames(data_2018) == 'CKD_other'] <- 'CKD_Other'
+
+data_2018 <- preprocess_data(data_2018)
+
+pop_mod_ids <- get_threshold(fitted_model = models_w_ckd_stages, train_data = data_2018, 
+                  target_perc = 0.02, cutoff = 0)[[2]]$savvy_pid
+
+tbl_name <-  "admission_counts_features_non_elect_2018_2019"
+
+q_mod_ids <- glue("SELECT *
+                FROM
+                  `{DB}_{tbl_name}`
+                WHERE
+                  savvy_pid IN ({toString(pop_mod_ids)})")
+
+pop_mod_2018 <- load_bq(pid, 
+                        query = get_metric_vars_query(DB, q_mod_ids,
+                                                      tbl_name, year_nbr = 2018))
+
+pop_mod_2018 <- add_race(q_mod_ids, pop_mod_2018)
+
+```
+
+```{r}
+query_lag <-  glue("SELECT *
+              FROM 
+              (
+                SELECT *
+                FROM
+                  `{DB}_admission_counts_features_non_elect_2018_trunc`
+              ) AS a
+              LEFT JOIN (
+                SELECT *
+                FROM
+                  `{DB}_frail_feats_by_quarter_201810`) AS b
+              USING
+                (savvy_pid)
+              LEFT JOIN (
+                SELECT * EXCEPT (total_raf)
+                FROM
+                  `{DB}_serious_conditions_201810`) as c
+              USING (savvy_pid)")
+
+data_lag <- load_bq(pid, query_lag)
+names(data_lag)[colnames(data_lag) == 'CKD_other'] <- 'CKD_Other'
+
+data_lag <- preprocess_data(data_lag)
+
+pop_lag_ids <- get_threshold(fitted_model = models_w_ckd_stages, train_data = data_lag, 
+                  target_perc = 0.02, cutoff = 0)[[2]]$savvy_pid
+
+tbl_name <-  "admission_counts_features_non_elect_2018_trunc"
+
+q_lag_ids <- glue("SELECT *
+                FROM
+                  `{DB}_{tbl_name}`
+                WHERE
+                  savvy_pid IN ({toString(pop_lag_ids)})")
+
+pop_lag_2018 <- load_bq(pid, 
+                        query = get_metric_vars_query(DB, q_lag_ids,
+                                                      tbl_name, year_nbr = 2018))
+
+pop_lag_2018 <- add_race(q_lag_ids, pop_lag_2018)
+
+# save(data_2018,
+#      data_lag,
+#      file = '~/bkt_inv_post_acute/data_2018.Rdata')
+
+save(pop_navi_2018,
+     pop_620_2018,
+     pop_mod_2018,
+     pop_lag_2018,
+     pop_2018,
+     file = '~/bkt_inv_post_acute/other_algo_2018.Rdata')
+```
+
+
+### on 2018-2019 data
+
+```{r}
+load('~/bkt_inv_post_acute/other_algo_2018.Rdata')
+
+pop_mod_2018 <- pop_mod_2018 %>% mutate(model = 'our model')
+pop_lag_2018 <- pop_lag_2018 %>% mutate(model = 'our model (on data with lag)')
+pop_navi_2018 <- pop_navi_2018 %>% mutate(model = 'NaviHealth')
+pop_620_2018 <- pop_620_2018 %>% mutate(model = 'Home Complex Care')
+
+pop_all <- rbind(pop_mod_2018, pop_lag_2018, pop_navi_2018, pop_620_2018)
+
+models <- unique(pop_all$model)
+
+x <- as.data.frame(t(sapply(models, function(x) 
+  (filter(pop_all, model == x) %>% 
+     make_metrics_table(., .$savvy_pid)) %>% 
+    as.data.frame() %>% 
+    dplyr::mutate(model = paste(x)) %>% 
+    mutate_at(vars(-c(7)), ~round(.,2))
+  ))) %>%  stack() %>% unstack()
+
+
+temp = pop_all %>% 
+  group_by(model) %>% 
+  summarise(proportion = n()/ length(pop_2018)*100) %>% 
+  mutate_at(vars(-c(1)), ~round(.,2)) 
+
+ord <- c(names(x)[-7], 'proportion')
+
+z <- left_join(x,temp) %>% 
+  select(model, everything()) %>%
+  tidyr::gather(variable, value, -model) %>% 
+  spread(model, value) %>% 
+  slice(match(ord, variable))
+
+
+z %>% 
+kable() %>% 
+kable_styling(bootstrap_options = c('striped', 'hover', 'condensed'))
+  
+```
+
+
+
+```{r}
+
+perc <- function(x){
+  paste(round(x*100,2))
+}
+
+summary_tab <- pop_all %>% 
+  select(-c(savvy_pid, mm_2019, contains('spend'), snf_admits, date_of_death)) %>% 
+  mutate(admit_flag = ifelse(admit_counts >0, 1, 0)) %>% 
+  group_by(model) %>% 
+  tidyr::gather(key, value, -c(age_2018, admit_counts, admit_flag, model)) %>% 
+  select(model, key,value) %>% 
+  group_by(model, key, value) %>% 
+  summarize(count = n()) %>% 
+  mutate(prop = round(100*count/sum(count),1),
+         total = sum(count)) %>% 
+  select(-count) %>% filter(value != 0)
+
+pop_all %>% 
+  group_by(model) %>% 
+  summarize(age_summary = paste(round(mean(age_2018),1), '\u00B1', round(sd(age_2018),1), ',', median(age_2018)))
+
+
+```
+
+```{r}
+pop_all %>%
+  ggplot(aes(x = race_final, group = model, y = ..prop.., fill = model)) +
+  geom_bar(position = 'dodge', stat = 'count', aes(y = ..prop..)) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(
+    legend.position = 'bottom',
+    axis.text = element_text(angle = 45, hjust = 1)
+    )
+
+
+pop_all2 %>% 
+  ggplot(aes(x = model, y = age_2018, fill = model)) +
+  geom_boxplot() +
+   theme(
+    legend.position = 'bottom'
+  ) +
+  ylim(20,100)
+```
+

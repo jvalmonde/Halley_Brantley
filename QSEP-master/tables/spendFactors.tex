@@ -1,0 +1,34 @@
+%latex.default(oddsFactors_out[, 2:7], title = "", file = "../tables/spendFactors.tex",     rowname = c("Intercept", "After child's diagnosis", "After child's diagnosis x Male",         "Male", "RAF (0.25, 1]", "RAF (1, 5]", "RAF (5, 10]",         "RAF (10, 100]", "s(Median Household Income)", "s(Age adult)",         "s(Sick child age)", "Single Adult", "Other Children",         "Time", "Choice Plus Plan", "Select Plus", "Choice",         "Gated HMO", "Male x RAF (0.25, 1]", "Male x RAF (1, 5]",         "Male x RAF (5, 10]", "Male x RAF (10, 100]", "Other Children x Single Adult",         "Male x Single Adult"), na.blank = FALSE)%
+\begin{table}[!tbp]
+\begin{center}
+\begin{tabular}{lllllll}
+\hline\hline
+\multicolumn{1}{l}{}&\multicolumn{1}{c}{ASD}&\multicolumn{1}{c}{Asthma}&\multicolumn{1}{c}{Cancer}&\multicolumn{1}{c}{Cerebral}&\multicolumn{1}{c}{T1D}&\multicolumn{1}{c}{Trauma}\tabularnewline
+\hline
+Intercept&101.693&114.376&103.383&150.702&140.57&130.982\tabularnewline
+After child's diagnosis&1.007&1.03&1&1.093&-&0.951\tabularnewline
+After child's diagnosis x Male&-&-&-&-&-&1.112\tabularnewline
+Male&0.813&0.817&0.795&0.827&0.864&0.775\tabularnewline
+RAF (0.25, 1]&1.016&0.984&1.035&0.93&1.189&1.004\tabularnewline
+RAF (1, 5]&1.913&1.904&1.931&2.168&2.654&1.945\tabularnewline
+RAF (5, 10]&4.383&4.364&3.821&4.502&4.792&3.862\tabularnewline
+RAF (10, 100]&8.69&6.484&5.935&6.866&11.901&8.089\tabularnewline
+s(Median Household Income)&1.003&1.003&1.003&1.003&1.004&1.002\tabularnewline
+s(Age adult)&-&1.001&1.005&0.991&0.997&0.999\tabularnewline
+s(Sick child age)&-&0.993&0.989&-&0.991&0.995\tabularnewline
+Single Adult&1.067&0.961&1.01&1.126&-&-\tabularnewline
+Other Children&-&1.001&1.039&1.059&-&-\tabularnewline
+Time&1.003&1.001&1.001&-&-&1.003\tabularnewline
+Choice Plus Plan&1.147&1.047&1.019&0.9&0.796&0.992\tabularnewline
+Select Plus&1.292&1.029&1.02&1.055&0.711&0.998\tabularnewline
+Choice&1.165&1.118&1.084&0.989&0.838&1.049\tabularnewline
+Gated HMO&1.011&0.951&0.965&0.863&0.629&0.902\tabularnewline
+Male x RAF (0.25, 1]&0.91&0.99&0.998&1.332&0.923&0.982\tabularnewline
+Male x RAF (1, 5]&1.067&1.001&1.073&1.109&1.197&1.071\tabularnewline
+Male x RAF (5, 10]&0.88&0.86&0.953&1.633&1.463&0.945\tabularnewline
+Male x RAF (10, 100]&0.874&1.076&1.198&1.052&1.032&0.868\tabularnewline
+Other Children x Single Adult&-&1.03&0.935&-&-&-\tabularnewline
+Male x Single Adult&-&1.026&-&-&-&-\tabularnewline
+\hline
+\end{tabular}\end{center}
+\end{table}

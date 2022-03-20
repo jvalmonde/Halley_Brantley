@@ -1,0 +1,345 @@
+---
+title: " Cross Validation"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GGally)
+library(modelr)
+library(lmtest)
+```
+
+# Cross-validation
+
+```{r, echo = FALSE}
+n <- 100
+df <- 
+  tibble(
+    x = 2*runif(n = n, min = 0, max = 1),
+    y = 2 + 2*x - 3*x^2 + rnorm(n, sd = 1)
+  ) 
+
+plot(y~x, df)
+```
+
+### Types of cross-validation 
+* k-fold: Split data into k samples
+* Monte Carlo (mc): Randomly split data into train and test as many times as you want
+
+```{r}
+df_split <-
+  df %>%
+  crossv_mc(n = 50) 
+
+df_split
+```
+
+## Fit model to training data
+```{r}
+df_split_model <-
+  df_split %>%
+  mutate(model = map(train, ~lm(y~x, data = .))) 
+
+df_split_model
+```
+
+## Want to compare RMSE on train and test data
+$$RMSE = \sqrt{\frac{1}{n} \sum (\widehat{y_i} - y_i)^2} $$
+
+```{r}
+# Change from long to wide and calculate rmse
+df_split_resid <- 
+  df_split_model %>%
+  gather(key = split, value = data, train, test) %>%
+  mutate(
+    rmse = map2_dbl(model, data, rmse)
+  ) 
+
+df_split_resid
+
+df_rmse <- 
+  df_split_resid %>%
+  select(.id, split, rmse) %>%
+  unnest()
+
+df_rmse
+```
+
+```{r}
+
+df_rmse %>%
+ggplot(aes(x = "linear", y = rmse)) +
+  geom_point(
+    aes(color = split), 
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+    alpha = 0.75) 
+```
+
+
+# Multiple models
+```{r}
+df_split_model <-
+  df_split %>%
+  mutate(model1 = map(train, ~lm(y~x, data = .)),
+         model2 = map(train, ~lm(y~poly(x,2), data = .)),
+         model3 = map(train, ~lm(y~poly(x,3), data = .)),
+         model4 = map(train, ~lm(y~poly(x,4), data = .))) 
+
+```
+
+# Change models from wide to long
+```{r}
+df_long_model <- df_split_model %>%
+  gather(key = model_name, value = model, model1:model4) 
+
+df_long_model
+
+df_long_model <- df_long_model %>%
+  gather(key = split, value = data, train, test)
+
+df_long_model
+```
+
+```{r}
+rmse_by_model <- 
+  df_long_model %>%
+  mutate(rmse = map2_dbl(model, data, rmse) ) %>%
+  select(.id, model_name, split, rmse) %>%
+  unnest()  
+  
+rmse_by_model
+```
+
+
+# Plot results
+```{r}
+
+rmse_by_model %>%
+  ggplot(aes(x = model_name, y = rmse, color = split, group = split)) +
+  stat_summary(geom = "line", fun.y = "mean") +
+  geom_point(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+    alpha = 0.5
+  ) +
+  ylim(0, NA) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(x = NULL)
+```
+
+# A variable selection example
+
+```{r}
+n <- 50
+p <- 30
+X <- matrix(rnorm(n*p), nrow=n, ncol = p)
+beta <- rep(0, p)
+beta[2] <- 3
+beta[8] <- 1
+
+Y <- X%*%beta + rnorm(n, sd = .5)
+
+sim_vs <- as_tibble(cbind(Y,X))
+names(sim_vs) <- c("y", paste0("x", 1:p))
+print(sim_vs)
+```
+
+### Start by calculating correlation between y and each x and ordering columns of x by correlation
+```{r}
+corr_xy <- cor(sim_vs[,2:(p+1)], sim_vs[,1]) 
+corr_order <- order(corr_xy, decreasing = TRUE)
+corr_order
+corr_xy[corr_order]
+
+sim_vs <- sim_vs %>% select(c(1, corr_order+1))
+corr_xy <- cor(sim_vs[,2:(p+1)], sim_vs[,1]) 
+corr_xy
+```
+### Fit models
+```{r}
+
+sim_split <- 
+  sim_vs %>% 
+  crossv_mc(n = 100) 
+
+sim_model <- sim_split
+
+i <- 3
+model_formula <- formula(paste0("y~", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "+")))
+  
+model_formula
+
+for (i in 1:p){
+  model_name <- paste0("model_", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "_"))
+  model_formula <- formula(paste0("y~", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "+")))
+  ## Pay attention to the ":=", need this in order to 
+  ## create names in a loop
+  sim_model <-
+    sim_model %>%
+    mutate(!!model_name := map(train, ~lm(model_formula, data = .)))
+}
+
+print(sim_model)
+
+```
+
+# Change models from wide to long, calculate RMSE and plot
+```{r}
+sim_long_model <- sim_model %>%
+  gather(key = model_name, value = model, starts_with("model"))  %>%
+  gather(key = split, value = data, train, test)
+
+rmse_by_model <- 
+  sim_long_model %>%
+  mutate(rmse = map2_dbl(model, data, rmse), 
+         numPredictors = as.numeric(factor(model_name))) %>%
+  select(.id, model_name, split, numPredictors, rmse) %>%
+  unnest() 
+
+rmse_by_model %>%
+  ggplot(aes(x = numPredictors, y = rmse, color = split, group = split)) +
+  stat_summary(geom = "line", fun.y = "mean") +
+  stat_summary(geom = "point", fun.y = "mean") +
+  geom_point(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+    alpha = 0.1
+  ) +
+  ylim(0, NA) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(x = "Number of predictors", 
+       y = "RMSE") 
+
+```
+
+# Model Selection
+
+## Can also look at estimated log likelihood of data
+
+## Asympotic theory 
+$$ \Lambda = -2*(logLik_{null} - logLik_{alt})$$
+
+will follow a chi-squared distribution under the null hypothesis with degrees of freedom equal to $df_{alt} - df_{null}$.
+* Null model must be nested within alternative
+
+```{r}
+# Fit all our models on the entire dataset
+models_full <- tibble(numPredictors = 2:(p+1), model = vector("list", p))
+
+for (i in 1:p){
+  model_name <- paste0("model_", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "_"))
+  model_formula <- formula(paste0("y~", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "+")))
+  models_full$model[[i]] <- lm(model_formula, data = sim_vs)
+}
+
+model_stats <- 
+  models_full %>% 
+  mutate(LL = map_dbl(model, logLik),
+         AIC = map_dbl(model, AIC)) 
+```
+
+## Like RMSE likeliood always increases with the number of parameters
+```{r}
+ggplot(model_stats, aes(x = numPredictors, y = LL)) + geom_point() + geom_line()
+```
+
+## But the increase isn't always signficant, can use Likelihood ratio
+## test or F-test for nested models
+```{r}
+lrtest(models_full$model[[1]], models_full$model[[2]])
+anova(models_full$model[[1]], models_full$model[[2]])
+```
+
+
+## Aikaike Information Criteria
+$$ AIC = 2p - 2logLike$$
+* Want to maxmize the log likelihood, so we want to minimized the negative log likelihood
+* AIC adds a penalty of 2 for each parameter added to the model. 
+
+## Bayesian Information Criteria
+
+```{r}
+ggplot(model_stats, aes(x = numPredictors, y = AIC)) + geom_point() + geom_line()
+```
+
+## Best Subset Selection
+* Best is determined by the model that minimizes residual sum of squares (RSS)
+
+```{r}
+library(leaps)
+regfit_full <- regsubsets(y~., sim_vs, nvmax = 15, 
+                          method = "exhaustive")
+summary(regfit_full)
+coef(regfit_full, 10)
+```
+# Use crossvalidation to select between models
+```{r}
+sim_split <- 
+  sim_vs %>% 
+  crossv_mc(n = 50) 
+
+fit_subsets <- function(df){
+  return(regsubsets(y~., data = df[[1]], nvmax=10))
+}
+
+fit_model <- function(df, regfit_full, i){
+  varNames <- names(coef(regfit_full, i))
+  mod_formula <- formula(paste0("y~", paste(varNames[2:length(varNames)], collapse = "+")))
+  return(lm(mod_formula, data = df))
+}
+
+
+sim_split_model <-
+  sim_split %>%
+  mutate(regfit_full = map(train, fit_subsets))
+
+
+for (i in 1:10){
+  model_name <- paste0("model_",i)
+  sim_split_model <- 
+  sim_split_model %>%
+  mutate(!!model_name :=  map2(train, regfit_full, fit_model, i = i))
+}
+
+
+
+```
+
+# Change models from wide to long, calculate RMSE and plot
+```{r}
+sim_long_model <- sim_split_model %>%
+  gather(key = model_name, value = model, starts_with("model"))  %>%
+  gather(key = split, value = data, train, test)
+
+rmse_by_model <- 
+  sim_long_model %>%
+  mutate(rmse = map2_dbl(model, data, rmse), 
+         numPredictors = as.numeric(factor(model_name))) %>%
+  select(.id, model_name, split, numPredictors, rmse) %>%
+  unnest() 
+
+rmse_by_model %>%
+  ggplot(aes(x = numPredictors, y = rmse, color = split, group = split)) +
+  stat_summary(geom = "line", fun.y = "mean") +
+  stat_summary(geom = "point", fun.y = "mean") +
+  geom_point(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+    alpha = 0.1
+  ) +
+  ylim(0, NA) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(x = "Number of predictors", 
+       y = "RMSE") 
+
+
+```

@@ -1,0 +1,393 @@
+---
+title: "Model and Variable Selection"
+output: 
+    slidy_presentation
+
+---
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+# Updates 
+- Case study feedback will be sent today 
+- Result: Needs Improvement/Good/Excellent
+- Case study 2 outputs will be the same as case study 1
+- Optimization (complete through Convex Problems I by end of day Friday)
+- Variable Selection R Lab due Tuesday (8/27)
+- No Monday lecture next week
+- Preference stats lecture Wednesday or Thursday?
+
+# Logistic Regression HW
+- What is the probability of default if my odds are $1$?
+- If my odds of default are $1$ and they increase by $1$ what are they now?
+- What is my probability now?
+- If my odds are $1$ and they increase by a factor of $1$ (are multiplied by $1$), what are they now?
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.height = 3, fig.width = 4, 
+                      fig.align = 'center')
+library(kableExtra)
+library(tidyverse)
+library(skimr)
+library(ISLR)
+library(modelr)
+library(lmtest)
+options(width=999)
+```
+
+---
+```{r}
+fit1 <- glm(default~., data = Default, family = "binomial")
+summary(fit1)
+round(exp(coef(fit1)), 3)
+```
+
+# What if you add interaction terms? {.smaller}
+```{r}
+fit_int <- glm(default~student*balance + balance*income, data = Default, family = "binomial")
+summary(fit_int)
+round(exp(coef(fit_int)), 3)
+```
+
+# How would you simulate from the logistic regression model?
+
+$$ y_i \sim bin(n=1, p_i)$$
+$$ p_i = \frac{exp(x_i^T\beta)}{1+exp(x_i^T\beta)}$$
+# Simulate Predictors 
+
+```{r, echo = TRUE}
+set.seed(2019)
+n <- 200
+p1 <- 3
+p2 <- 2
+
+X_cont <- matrix(rnorm(n*p1), ncol=p1, nrow=n)
+X_cat <- matrix(rbinom(n*p2, size = 1, prob = .2), ncol=p2, nrow = n)
+X <- cbind(1, X_cont, X_cat)
+
+beta <- c(0, 4, -1, 0, .4, 3)
+beta 
+```
+
+# Simulate Response
+
+```{r, echo = TRUE}
+eta <- X %*% beta
+prob <- exp(eta)/(1+exp(eta))
+Y <- rbinom(n, 1, prob = prob)
+sim_df <- data.frame(cbind(Y, X_cont, X_cat))
+```        
+
+# Fit model {.smaller}
+```{r, echo = TRUE}
+summary(glm(Y~., data = sim_df, family = binomial))
+```
+---
+
+```{r, echo = TRUE}
+table(sim_df$V5)
+table(sim_df$Y)
+table(sim_df$V5, sim_df$Y)
+```
+
+# Simulate n=500 {.smaller}
+```{r}
+set.seed(2019)
+n <- 500
+X_cont <- matrix(rnorm(n*p1), ncol=p1, nrow=n)
+X_cat <- matrix(rbinom(n*p2, size = 1, prob = .2), ncol=p2, nrow = n)
+X <- cbind(1, X_cont, X_cat)
+eta <- X %*% beta
+prob <- exp(eta)/(1+exp(eta))
+Y <- rbinom(n, 1, prob = prob)
+sim_df <- data.frame(cbind(Y, X_cont, X_cat))
+summary(glm(Y~., data = sim_df, family = binomial))
+```
+
+# Simulate n=5000 {.smaller}
+```{r}
+set.seed(2019)
+n <- 5000
+X_cont <- matrix(rnorm(n*p1), ncol=p1, nrow=n)
+X_cat <- matrix(rbinom(n*p2, size = 1, prob = .2), ncol=p2, nrow = n)
+X <- cbind(1, X_cont, X_cat)
+eta <- X %*% beta
+prob <- exp(eta)/(1+exp(eta))
+Y <- rbinom(n, 1, prob = prob)
+sim_df <- data.frame(cbind(Y, X_cont, X_cat))
+summary(glm(Y~., data = sim_df, family = binomial))
+```
+
+# How to simulate correlated predictors?
+- Use multivariate Gaussian properties
+- Can also use probability integral transform
+
+\begin{align*}
+Z \sim& MVN(0, I) \\
+X =& \Sigma^{1/2}Z + \mu\\
+X \sim& MVN(\mu, \Sigma)
+\end{align*}
+
+# Get $\Sigma^{1/2}$ using Cholesky decomposition
+
+```{r, echo = TRUE}
+n <- 1000
+p <- 4
+Z <- matrix(rnorm(n*p), ncol=p, nrow=n)
+Sigma <- matrix(.6, nrow = p, ncol = p)
+diag(Sigma) <- 1
+Sigma
+U <- chol(Sigma)
+t(U)%*%U
+```
+# Get correlated X
+
+```{r, echo = TRUE}
+cor(Z)
+X <- Z %*% U 
+cor(X)
+```
+
+# Get a uniform correlated X
+```{r, echo = TRUE}
+X_unif <- pnorm(X)
+cor(X_unif)
+summary(X_unif)
+```
+
+
+# Model and Variable Selection 
+
+
+# Example Data {.smaller}
+```{r}
+n <- 50
+p <- 30
+X <- matrix(rnorm(n*p), nrow=n, ncol = p)
+beta <- rep(0, p)
+beta[2] <- 3
+beta[8] <- 1
+
+Y <- X%*%beta + rnorm(n, sd = .5)
+sim_mat <- cbind(Y,X)
+colnames(sim_mat) <- c("y", paste0("x", 1:p))
+sim_vs <- as_tibble(sim_mat)
+skim(sim_vs)
+```
+
+
+# Start by calculating correlation between y and each x and ordering columns of x by correlation
+```{r}
+corr_xy <- cor(sim_vs[,2:(p+1)], sim_vs[,1]) 
+corr_order <- order(corr_xy, decreasing = TRUE)
+sim_vs <- sim_vs %>% select(c(1, corr_order+1))
+corr_xy <- cor(sim_vs[,2:(p+1)], sim_vs[,1]) 
+corr_xy
+```
+
+# Types of cross-validation 
+* leave-one-out
+* k-fold: Split data into k samples
+* Monte Carlo (mc): Randomly split data into train and test as many times as you want
+
+# Fit models
+```{r, echo = TRUE}
+
+sim_split <- 
+  sim_vs %>% 
+  crossv_mc(n = 100) 
+
+sim_model <- sim_split
+
+i <- 2
+model_formula <- formula(paste0("y~", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "+")))
+  
+model_formula
+
+for (i in 1:p){
+  model_name <- paste0("model_", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "_"))
+  model_formula <- formula(paste0("y~", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "+")))
+  ## Pay attention to the ":=", need this in order to 
+  ## create names in a loop
+  sim_model <-
+    sim_model %>%
+    mutate(!!model_name := map(train, ~lm(model_formula, data = .)))
+}
+
+print(sim_model)
+
+```
+
+# Change models from wide to long, calculate RMSE and plot
+
+```{r, fig.width = 5, fig.height = 5}
+sim_long_model <- sim_model %>%
+  gather(key = model_name, value = model, starts_with("model"))  %>%
+  gather(key = split, value = data, train, test)
+
+rmse_by_model <- 
+  sim_long_model %>%
+  mutate(rmse = map2_dbl(model, data, rmse), 
+         numPredictors = as.numeric(factor(model_name))) %>%
+  select(.id, model_name, split, numPredictors, rmse) %>%
+  unnest() 
+
+rmse_by_model %>%
+  ggplot(aes(x = numPredictors, y = rmse, color = split, group = split)) +
+  stat_summary(geom = "line", fun.y = "mean") +
+  stat_summary(geom = "point", fun.y = "mean") +
+  geom_point(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+    alpha = 0.1
+  ) +
+  ylim(0, NA) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(x = "Number of predictors", 
+       y = "RMSE") 
+
+```
+
+
+# Asympotic theory 
+$$ \Lambda = -2*(logLik_{null} - logLik_{alt})$$
+
+will follow a chi-squared distribution under the null hypothesis with degrees of freedom equal to $df_{alt} - df_{null}$.
+* Null model must be nested within alternative
+
+```{r, echo = TRUE}
+# Fit all our models on the entire dataset
+models_full <- tibble(numPredictors = 2:(p+1), model = vector("list", p))
+
+for (i in 1:p){
+  model_name <- paste0("model_", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "_"))
+  model_formula <- formula(paste0("y~", 
+                               paste(names(sim_vs)[2:(i+1)], 
+                                 collapse = "+")))
+  models_full$model[[i]] <- lm(model_formula, data = sim_vs)
+}
+
+model_stats <- 
+  models_full %>% 
+  mutate(LL = map_dbl(model, logLik),
+         AIC = map_dbl(model, AIC)) 
+```
+
+# Like RMSE likeliood always increases with the number of parameters
+```{r}
+ggplot(model_stats, aes(x = numPredictors, y = LL)) + geom_point() + geom_line()
+```
+
+# The increase isn't always signficant, can use Likelihood ratio test or F-test for nested models
+```{r, echo = TRUE}
+lrtest(models_full$model[[1]], models_full$model[[2]])
+anova(models_full$model[[1]], models_full$model[[2]])
+```
+
+
+## Aikaike Information Criteria
+$$ AIC = 2p - 2logLike$$
+* Want to maxmize the log likelihood, so we want to minimized the negative log likelihood
+* AIC adds a penalty of 2 for each parameter added to the model. 
+
+# Bayesian Information Criteria
+
+```{r}
+ggplot(model_stats, aes(x = numPredictors, y = AIC)) + geom_point() + geom_line()
+```
+
+# Forward Subset Selection
+
+- Best is determined by the model that minimizes residual sum of squares (RSS)
+
+```{r, echo = TRUE}
+library(leaps)
+regfit_full <- regsubsets(y~., sim_vs, nvmax = 15, 
+                          method = "forward")
+summary(regfit_full)
+coef(regfit_full, 10)
+```
+
+# Use crossvalidation to select between models
+
+```{r, echo = TRUE}
+sim_split <- 
+  sim_vs %>% 
+  crossv_mc(n = 50) 
+
+fit_subsets <- function(df){
+  return(regsubsets(y~., data = df[[1]], nvmax=10, method = "forward"))
+}
+
+fit_model <- function(df, regfit_full, i){
+  varNames <- names(coef(regfit_full, i))
+  mod_formula <- formula(paste0("y~", paste(varNames[2:length(varNames)], collapse = "+")))
+  return(lm(mod_formula, data = df))
+}
+
+sim_split_model <-
+  sim_split %>%
+  mutate(regfit_full = map(train, fit_subsets))
+
+for (i in 1:10){
+  model_name <- paste0("model_",i)
+  sim_split_model <- 
+  sim_split_model %>%
+  mutate(!!model_name :=  map2(train, regfit_full, fit_model, i = i))
+}
+
+
+
+```
+
+# Change models from wide to long, calculate RMSE and plot
+```{r}
+sim_long_model <- sim_split_model %>%
+  gather(key = model_name, value = model, starts_with("model"))  %>%
+  gather(key = split, value = data, train, test)
+
+rmse_by_model <- 
+  sim_long_model %>%
+  mutate(rmse = map2_dbl(model, data, rmse), 
+         numPredictors = as.numeric(factor(model_name))) %>%
+  select(.id, model_name, split, numPredictors, rmse) %>%
+  unnest() 
+
+rmse_by_model %>%
+  ggplot(aes(x = numPredictors, y = rmse, color = split, group = split)) +
+  stat_summary(geom = "line", fun.y = "mean") +
+  stat_summary(geom = "point", fun.y = "mean") +
+  geom_point(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+    alpha = 0.1
+  ) +
+  ylim(0, NA) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  labs(x = "Number of predictors", 
+       y = "RMSE") 
+
+
+```
+
+
+
+# For the PCR question on the homework
+
+```{r, echo = TRUE, eval = FALSE}
+pcrmod <- pcr(Apps ~ ., data = train, scale = T,
+                validation = "CV")
+prediction_pcr <- predict(pcrmod, test, ncomp = pcrmod$validation$ncomp)
+```

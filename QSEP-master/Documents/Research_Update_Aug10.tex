@@ -1,0 +1,217 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%  This Beamer template was created by Cameron Bracken.
+%%  Anyone can freely use or modify it for any purpose
+%%  without attribution.
+%%
+%%  Last Modified: January 9, 2009
+%%
+
+\documentclass[xcolor=x11names,compress]{beamer}
+
+%% General document %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+\usetikzlibrary{decorations.fractals}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%% Beamer Layout %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\useoutertheme[subsection=false,shadow]{miniframes}
+\useinnertheme{default}
+\usefonttheme{serif}
+\usepackage{palatino}
+
+\setbeamerfont{title like}{shape=\scshape}
+\setbeamerfont{frametitle}{shape=\scshape}
+
+\setbeamercolor*{lower separation line head}{bg=DeepSkyBlue4} 
+\setbeamercolor*{normal text}{fg=black,bg=white} 
+\setbeamercolor*{alerted text}{fg=red} 
+\setbeamercolor*{example text}{fg=black} 
+\setbeamercolor*{structure}{fg=black} 
+
+\setbeamercolor*{palette tertiary}{fg=black,bg=black!10} 
+\setbeamercolor*{palette quaternary}{fg=black,bg=black!10} 
+
+\renewcommand{\(}{\begin{columns}}
+\renewcommand{\)}{\end{columns}}
+\newcommand{\<}[1]{\begin{column}{#1}}
+\renewcommand{\>}{\end{column}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}
+\title{QSEP Research Update}
+%\subtitle{SUBTITLE}
+\author{
+	Halley Brantley\\
+	{\it Savvy Sherpa}\\
+}
+\date{
+	\begin{tikzpicture}[decoration=Koch curve type 2] 
+	\draw[DeepSkyBlue4] decorate{ decorate{ decorate{ (0,0) -- (3,0) }}}; 
+	\end{tikzpicture}  
+	\\
+	\vspace{1cm}
+	\today
+}
+\titlepage
+\end{frame}
+
+\section{\scshape Overview}
+
+\begin{frame}{Research Questions}
+Original
+\begin{itemize}
+	\item Can we identify a dataset containing the pediatric illness populations of interest and their immediate family members? 
+	\item Can we quantify the outcomes of interest and their relationship to the hypothesized mediating factors? 
+	\item Do we see any significant secondary effects of pediatric illness on family members, in comparison to a sensibly-defined control group? 
+\end{itemize}
+Updated 
+\begin{itemize}
+	\item Do we see a difference in adult family member spending before and after a child is diagnosed?
+\end{itemize}
+\end{frame}
+
+\section{\scshape Data}
+
+\begin{frame}
+Number of children under 16 with each condition, enrolled for more than 3 months, and for whom we have at least one month of spend data before diagnosis. 
+\begin{itemize}
+	\item Total sick children under 16: 136,791
+	\item Unique Families: 122,588 
+	\item Asthma:  87,872
+	\item Autism (ASD): 8,732
+	\item Cancer: 27,466
+	\item Cerebral Palsy: 1,440
+	\item Type 1 Diabetes (T1D): 1,434
+	\item Traumatic Event: 22,313
+	\item Multiple Conditions: 11,756
+\end{itemize}	
+\end{frame}
+
+\begin{frame}{Data Cleaning }
+\begin{itemize}
+	\item To identify parents/guardians in the household used the criteria:
+		\begin{itemize}
+			\item Same household as sick child
+			\item Older than 15
+			\item At least 15 years older than the sick child 
+			\item No more than 60 years older than the sick child
+			\item Within 15 years of the age of the oldest member of the household
+		\end{itemize} 
+	\item Use months within 9 months of child's diagnosis. 
+	\item Only include adult family members with at least 2 months of claims before diagnosis and 2 months after, including month of diagnosis. 
+\end{itemize}
+\end{frame}
+
+
+\section{\scshape Modeling}
+
+\begin{frame}{Models}
+\begin{itemize}
+	\item Goal: model monthly spend per adult family member before and after diagnosis.
+	\item Approach: Use a hierarchical model
+	\begin{enumerate}
+		\item Model the probability that monthly spend is non-zero using logistic regression on confounders and 
+		indicator of after diagnosis. 
+		\item Conditioned on the fact that spend is non-zero model the total spend using lognormal regression on confounders and indicator of after diagnosis. 
+	\end{enumerate}	
+	\item Models were fit separately by gender of adult.
+	\item Predictions are calculated as the predicted probability of non-zero spend multiplied by the predicted spend given that spend is non-zero. 
+	\item Determine confidence intervals for predictions by bootstrapping (re-sample members with replacement and re-calculate predictions)
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Confounders}
+\begin{itemize}
+	\item RAF categories: 0, 0.5, 1, 2.5, 5, 10, 200 
+	\item Income categories: 0, 50, 100, 150, 260 (thousands)
+	\item Plan Type: Gated HMO, Choice Plus, Select Plus, Choice, Other
+	\item Indicator of only one adult on the plan that meets the above criteria 
+	\item Number of children on plan: 1, 2-4, 5+
+	\item Indicator of multiple sick children
+	\item Age category of youngest child: Infant, Child, Teenager
+	\item Months Enrolled
+	\item Time (natural spline)
+	\item Adult age (natural spline)
+\end{itemize}  
+\end{frame}
+
+\section{\scshape Results}
+
+\begin{frame}{Predicted difference in mean monthly spend before and after diagnosis (\$)}
+Averaged across all confounders.
+\input{../tables/pred_CIs.tex}
+\end{frame}
+
+\begin{frame}{Factor Increase in odds of depression }
+95\% confidence intervals
+\input{../tables/odds_depression.tex}
+\end{frame}
+
+\begin{frame}{ASD effect on men's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_male_ASD.png}
+\end{frame}
+
+\begin{frame}{ASD effect on women's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_female_ASD.png}
+\end{frame}
+
+\begin{frame}{Cerebral Palsy effect on men's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_male_Cerebral.png}
+\end{frame}
+
+\begin{frame}{Cerebral Palsy effect on women's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_female_Cerebral.png}
+\end{frame}
+
+\begin{frame}{Cancer effect on men's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_male_CA.png}
+\end{frame}
+
+\begin{frame}{Cancer effect on women's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_female_CA.png}
+\end{frame}
+
+\begin{frame}{Trauma effect on men's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_male_Trauma.png}
+\end{frame}
+
+\begin{frame}{Trauma effect on women's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_female_Trauma.png}
+\end{frame}
+
+\begin{frame}{Asthma effect on men's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_male_Asthma.png}
+\end{frame}
+
+\begin{frame}{Asthma effect on women's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_female_Asthma.png}
+\end{frame}
+
+\begin{frame}{T1D effect on men's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_male_T1D.png}
+\end{frame}
+
+\begin{frame}{T1D effect on women's spending}
+\includegraphics[width=.75\linewidth]{../figures/predicted_spend_female_T1D.png}
+\end{frame}
+
+\begin{frame}{T1D effect on women's spending}
+\includegraphics[width=\linewidth]{../figures/spend_diff_Cancer_T1D.png}
+\end{frame}
+
+\begin{frame}
+\includegraphics[width=\linewidth]{../figures/spend_diff_ASD_Cerebral.png}
+\end{frame}
+
+\end{document}

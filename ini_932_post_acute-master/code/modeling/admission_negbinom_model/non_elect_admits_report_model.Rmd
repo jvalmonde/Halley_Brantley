@@ -1,0 +1,92 @@
+---
+title: "Number of Admissions in 2018 (non elective admissions, negative Binomial)"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    code_folding: hide
+    df_print: paged
+    highlight: haddock
+    theme: flatly
+---
+
+
+```{r include = FALSE}
+library(drake)
+library(dplyr)
+library(tidyr)
+library(rlang)
+library(glue)
+library(kableExtra)
+
+cache <- new_cache(path = "/storage_pool/cache/")
+cache_list <- cached(cache = cache)
+
+# load all objects for combined metrics
+cmb_list <- grep("cmb_metrics", cache_list, value = TRUE)
+loadd(starts_with("cmb_metrics"), cache = cache)
+
+model_order_map <- tibble(
+  name = c("orig_model", "w_hcc5_plus", "w_intrct", "w_admits", "w_serious_cnd", "w_ckd_stages"),
+  label =  c("Original Feature set", "With HCC 5+", "With Age 80+ and Hip And Fracture", 
+             "With Ip Admits and Age80+", "With Serious Conditions", "With CKD Stages")
+)
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
+```
+
+```{r}
+create_kable_metrics = function(pattern) 
+{
+  by <- lapply(
+    1:nrow(model_order_map),
+    function(x) {
+      name <- model_order_map$name[x]
+      obj <- grep(glue(pattern), cmb_list, value = TRUE)
+      eval_tidy(sym(obj)) %>%  
+        mutate(model = model_order_map$label[x]) %>% 
+        dplyr::select(model, everything())
+    }
+  )
+  
+  bind_rows(by) %>% 
+    mutate_if(is.numeric, ~round(., 3)) %>% 
+      kable() %>% 
+      kable_styling() %>% 
+      collapse_rows(columns = 1, valign = "top")
+  
+}
+```
+
+
+### Using % positive predicted dependent threshold {.tabset .tabset-fade}
+
+#### 5% positive predicted
+```{r}
+create_kable_metrics("cmb_metrics_by_pct_models_{name}_0.05")
+
+```
+
+
+#### 2% positive predicted
+```{r}
+create_kable_metrics("cmb_metrics_by_pct_models_{name}_0.02")
+```
+
+
+### Threshold from cutoff > 0 (% positive predicted dependent) {.tabset .tabset-fade}
+
+#### 5 % positive predicted
+```{r}
+create_kable_metrics("cmb_metrics_th0_.*_{name}_0.05")
+```
+
+#### 2% positive predicted
+```{r}
+create_kable_metrics("cmb_metrics_th0_.*_{name}_0.02")
+```
+

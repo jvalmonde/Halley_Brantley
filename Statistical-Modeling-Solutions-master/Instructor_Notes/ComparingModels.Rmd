@@ -1,0 +1,209 @@
+---
+title: "Comparing Models"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+class: center, middle, huge
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+library(splines)
+library(tidyverse)
+library(leaps)
+library(glmnet)
+library(pls)
+theme_set(theme_classic() + theme(text = element_text(size = 20)))
+```
+
+## Why do we want to make models?
+
+--
+
+### Prediction
+
+--
+
+### Inference
+
+---
+
+## Bias - Variance Trade-off
+
+```{r, echo = FALSE, fig.height=3.5}
+n <- 50
+x <- runif(n)
+X <- bs(x, df=8)
+beta <- c(-2, 8, 1, 0, 10, -4, -2, 3)
+y <- X%*%beta + rnorm(n, sd=1)
+y2 <- -1 + 4*x + rnorm(n, sd=1)
+
+
+df <- tibble(y, y2, x)
+ggplot(df, aes(x, y)) + geom_point() + 
+  geom_smooth(method="lm", se = FALSE, aes(col = "Higher Bias")) +
+  geom_smooth(method="loess", span = 0.2, se = FALSE, aes(col = "Higher Variance")) +
+  labs(col = NULL)
+ggplot(df, aes(x, y2)) + geom_point() + 
+  geom_smooth(method="loess", span = 0.2, se = FALSE, aes(col = "Higher Variance")) +
+  geom_smooth(method="lm", se = FALSE, aes(col = "Higher Bias")) + 
+  labs(col = NULL)
+```
+
+---
+
+# Ways to compare models
+
+## Holdout Methods
+- Split data into validation and training
+- K-fold cross-validation
+- Monte-carlo cross-validation
+- Leave-one-out cross-validation
+
+## Information criteria
+- Akaike information criteria (AIC)
+- Bayes information criteria (BIC)
+- Mallow's Cp
+- Adjusted $R^2$
+- Deviance information criteria (DIC)
+- Watanabe-Akaike information criterion (WAIC)
+
+---
+
+# Cons
+
+## Holdout Methods
+- Time consuming
+- Not all the data is used to fit the model
+
+## Information Criteria
+- Can't be used for models without explicit likelihood functions
+- Approximations based on large samples
+
+---
+
+# Levels of comparison
+
+- Choices/tuning parameters within a method
+
+- Comparing between methods
+
+---
+
+# Best Subset Selection -need to select which model size to use
+
+```{r, include = FALSE}
+n <- 100
+p <- 14
+X <- matrix(rnorm(n*p), nrow=n, ncol = p)
+beta <- rep(0, p)
+beta[2] <- 2
+beta[8] <- 2
+
+Y <- X%*%beta + rnorm(n, sd = .2)
+sim_vs <- as.data.frame(cbind(Y,X))
+colnames(sim_vs) <- c("y", paste0("x", 1:p))
+```
+
+```{r}
+# Randomly split data
+folds <- sample(1:5, nrow(sim_vs), replace=TRUE)
+
+train <- sim_vs[folds != 1, ]
+test <- sim_vs[folds == 1, ]
+x_test <- model.matrix(y~., test)
+
+all_models <- regsubsets(y~., train, nvmax = ncol(train)-1, 
+                         method = "exhaustive")
+summ_all <- summary(all_models)
+```
+---
+```{r}
+plot(all_models)
+```
+
+---
+class:small
+```{r}
+summ_all$outmat
+```
+
+---
+```{r}
+# Select the best model based on BIC
+which.min(summ_all$bic)
+# Get the coefficients
+beta <- coef(all_models, which.min(summ_all$bic))
+beta
+# Get the predictions on the test set
+preds <- x_test[,names(beta)]%*%beta
+test_error <- sqrt(mean((test$y - preds)^2))
+test_error
+```
+
+---
+
+# Lasso and Ridge - need to select tuning parameter
+- Lasso
+$$ \min \sum_i (y_i - x_i^T\beta)^2 + \lambda||\beta||_1$$
+- Ridge
+$$ \min \sum_i (y_i - x_i^T\beta)^2 + \lambda||\beta||_2$$
+
+- Elastic Net
+
+$$ \min \sum_i (y_i - x_i^T\beta)^2 + \lambda\left[\alpha||\beta||_1 + (1-\alpha)||\beta||_2\right]$$
+
+
+---
+
+## Fitting a grid of $\lambda$ values
+
+```{r, fig.height=3}
+lasso <- glmnet(x=as.matrix(train[,-1]), y=train[,1], alpha=1)
+plot(lasso)
+```
+
+---
+
+## Use CV to choose lambda
+```{r}
+lasso_cv <- cv.glmnet(x=as.matrix(train[,-1]), y=train[,1], alpha=1)
+plot(lasso_cv)
+lasso_cv$lambda.min
+lasso_cv$lambda.1se
+```
+
+---
+
+```{r}
+preds <- predict(lasso_cv, newx = as.matrix(test[,-1]), s="lambda.min")
+sqrt(mean((test$y - preds)^2))
+
+preds <- predict(lasso_cv, newx = as.matrix(test[,-1]), s="lambda.1se")
+sqrt(mean((test$y - preds)^2))
+```
+
+---
+
+## Principle Component Regression
+
+```{r, fig.height = 4, fig.align='center'}
+pcrmod <- pcr(y ~ ., data = train, scale = T, validation = "CV")
+validationplot(pcrmod,val.type="MSEP")
+pcrmod$validation$ncomp
+```
+
+---
+```{r}
+preds <- predict(pcrmod, test, ncomp = pcrmod$validation$ncomp)
+sqrt(mean((test$y - preds)^2))
+```
+
+---
+  
+  

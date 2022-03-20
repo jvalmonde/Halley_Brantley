@@ -1,0 +1,66 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{csquotes}
+\usepackage{lipsum}  
+\usepackage{hyperref}
+\hypersetup{
+	colorlinks = true,
+	citecolor = blue,
+	urlcolor = blue
+}
+\urlstyle{same}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Bibliography
+\newcommand{\Ncite}[1]{\citeauthor{#1} (\citeyear{#1})}
+%Import the natbib package and sets a bibliography  and citation styles
+\usepackage[backend=biber,style=authortitle]{biblatex}
+\bibliography{ini_000_refs.bib}
+
+
+\title{Literature Review Title}
+\date{Date}
+\author{author1, author2}
+\begin{document}
+	\maketitle
+	
+\section*{Summary}
+
+\lipsum[2]
+
+
+
+\section*{Annotated Bibliography}
+
+\begin{enumerate}
+
+	\item (\citeyear{schaink2012scoping}) \cite{schaink2012scoping} 
+	\begin{itemize}
+		\item Conducted literature review for definitions and descriptions of complexity and developed a Complexity Framework to understanding patient complexity.
+		\item Used 1,669 articles, 127 of which were considered relevant as assessed by the inclusion/exclusion criteria. 
+		\item Concluded the following complexity framework:
+		\begin{enumerate}
+			\item Medical/physical, e.g. functional impairment, chronic symptoms (e.g. pain), challenges in the application of clinical practice guidelines (CPGs), multimorbidity, and polypharmacy;
+			\item Mental health, e.g. depression, psychological distress, cognitive impairment, and substance use;		
+			\item Demographics, e.g. age, frailty, female, ethnicity, education;
+			\item Social capital, e.g. caregiver strain, poor social support, relationship strain and lack of leisure time;		
+			\item Health and social experiences, e.g. healthcare utilization, quality of life, self-management, healthcare system navigation.
+		\end{enumerate}
+	\end{itemize}
+
+	\item (\citeyear{violan2014prevalence}) \cite{violan2014prevalence} 
+	\begin{itemize} 
+		\item Performed a systematic review of literature to determine if there was any established determinants for multimorbidity.
+		\item Found age, lower socioeconomic status, and female gender as well as the presence of mental health problems to be well established determinants. 
+		\item Found hypertension and osteoarthritis appear to be a very common combination followed by different cardiovascular condition combinations. 
+		\item Concluded estimates of multimorbidity prevalence and the identification of specific patterns vary widely between studies. 
+	\end{itemize}
+
+ \end{enumerate}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\printbibliography
+
+\end{document}          

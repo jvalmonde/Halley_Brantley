@@ -1,0 +1,154 @@
+---
+title: '__Statistical Modeling Course__'
+subtitle: '__Multi-level Modeling Assignment__'
+output:
+  pdf_document:
+    fig_height: 4
+    fig_width: 5.5
+
+fontsize: 11pt
+
+---
+
+In this lab we will use the `musicdata.csv` dataset to develop a deeper understanding of multi-level (mixed effect) models. 
+
+Objective: To examine models for predicting the happiness of musicians prior to performances, as measured by the positive affect scale from the PANAS (Positive Affect Negative Affect Schedule) instrument, `pa`.
+
+The dataset contains the following variable
+
+### Variables in original data set
+- id:			      unique musician identification number
+- diary:		      cumulative total of diaries filled out by musician
+- previous:      number of previous diary entries filled out
+- perform_type:	type of performance (solo, large or small ensemble)
+- memory:		    performed from Memory, using Score, or Unspecified
+- audience:		  who attended (Instructor, Public, Students, or Juried)
+- pa:			      positive affect from PANAS
+- na:			      negative affect from PANAS
+- age:			      musician age
+- gender:		    musician gender
+- instrument:	  Voice, Orchestral, or Piano
+- years_study:	  number of years studied the instrument
+- mpqsr:		      stress reaction subscale from MPQ 
+- mpqab:		      absorption subscale from MPQ 
+- mpqpem:		    positive emotionality composite scale from MPQ
+- mpqnem:		    negative emotionality composite scale from MPQ
+- mpqcon:		    constraint composite scale from MPQ
+
+```{r, include = FALSE}
+library(tidyverse)
+library(lme4)
+library(arm)
+library(merTools)
+```
+
+```{r}
+music <- read.csv("musicdata.csv")
+music <- music %>% mutate(solo = ifelse(perform_type == "Solo", 1, 0))
+```
+
+## Problem 1
+In this dataset the group is the musician and the unit is the performance. Classify the predictors into unit-level and group-level.
+
+Answer: 
+
+Group-level: age, gender, instrument, years_study, mpqsr, mpqab, mpqpem, mpqnem, mpqcon
+Unit-level: diary, previous, perform_type, memory, audience, pa, na
+
+## Problem 2
+What is the max, min, and median number of diary entries for the musicians? 
+
+```{r}
+music %>% count(id) %>% dplyr::select(n) %>% summary()   
+```
+Answer: The minimum number of entries is 2 and maximum and median are both 15.
+
+## Problem 3
+
+ Write the equations for the model that predicts positive affect, `pa`, with a random intercept term and no predictors. Clearly define all of the terms. Fit this model. What is the estimated mean positive affect across all diary entries and musicians? Use this model to calculate the intraclass correlation coefficient. Interpret this value. 
+ 
+Answer: 
+$$y_{i} = \alpha_{j[i]} + \epsilon_{i}$$
+$$\alpha_j \sim N(\mu_{\alpha}, \sigma_{\alpha}^2)$$
+$$\epsilon_{i} \sim N(0, \sigma_y^2)$$
+
+where $y_{i}$ is the positive affect of diary entry $i$ which was made by musician $j$. $\alpha_{j[i]}$ represents the random effect of musician $j$. $\sigma_{\alpha}^2$ is the variance between musicians and  $\sigma_{y}^2$ is the variance within a musician. $\mu_{\alpha}$ is the mean value of positive affect for all musicians. 
+
+```{r}
+model.a <- lmer(pa ~ 1 + (1|id), data = music)
+summary(model.a)
+# Get standard deviations
+sigmas <- arm::sigma.hat(model.a)$sigma
+# Calculate ICC
+icc <- sigmas$id^2/(sigmas$id^2 + sigmas$data^2)
+icc
+```
+$\mu_{\alpha} = 32.56$ is the estimated mean value of positive affect for all musicians and performances. 
+36.3 \% of the total variablility in performance happiness scores is attributable to the difference among subjects. 
+
+## Problem 4
+Building on the model from the previous problem, include audience type (`audience`), performing solo (`solo`) and (`years_study`) in your model as fixed effects. Write the equation for this model. Fit the model and interpret the estimates. 
+
+Answer: 
+$$y_{i} = \alpha_{j[i]} + \beta_1per(juried)_{i} + \beta_2per(public)_{i} + \beta_3per(students)_{i} + \beta_4solo_{i} + \beta_5 years_{j[i]} + \epsilon_{i}$$
+
+$$\alpha_j \sim N(\mu_{\alpha}, \sigma_{\alpha}^2)$$
+$$\epsilon_{i} \sim N(0, \sigma_y^2)$$
+
+$\beta_1$ is the difference between a public performance and Instructor performance, $\beta_2$ is the difference between a juried recital and a instructor performance, $\beta_3$ is the difference between a performance to students and a instructor performance, $\beta_4$ is the effect of performing solo, and  $\beta_5$ is the change in positive affect with a one year change in years study. 
+
+```{r}
+model.b <- lmer(pa ~ audience + solo + years_study + (1|id), data = music)
+summary(model.b)
+# Get standard deviations
+sigmas <- arm::sigma.hat(model.a)$sigma
+# Calculate ICC
+icc <- sigmas$id^2/(sigmas$id^2 + sigmas$data^2)
+icc
+```
+
+Given the performance type and years of study the within musician variance $(\sigma_{y} = 6.2)$ is greater than the between musician variance $(\sigma_{\alpha} = 4.5)$. Happiness when performing in front of other students is not significantly different than performing for an instructor, (the standard error is greater than the estimated effect). There is evidence that performing in front of a juried audience or public audience increases happiness. Years of study does not seem to have a linear effect on happieness. Performing solo also doesn't seem to have an effect. 
+
+## Problem 5
+Fit the model in the previous problem but now allow the effect of performing solo to vary by musician (random slopes). Write the equation for this model. What are the estimates for the mean effect of solo and the variance of the effect of solo. 
+
+$$y_{i} = \alpha_{j[i]} + \gamma_{j[i]}solo_{i} + \beta_1per(juried)_{i} + \beta_2per(public)_{i} + \\ \beta_3per(students)_{i} +  \beta_5 years_{j[i]} + \epsilon_{i}$$
+
+$$\alpha_j \sim N(\mu_{\alpha}, \sigma_{\alpha}^2)$$
+$$\gamma_j \sim N(\mu_{\gamma}, \sigma_{\gamma}^2)$$
+$$\epsilon_{i} \sim N(0, \sigma_y^2)$$
+
+```{r}
+model.c <- lmer(pa ~ years_study + audience + solo + (1+solo|id), data = music)
+summary(model.c)
+```
+
+The mean effect of playing solo is $\mu_{gamma} = -0.19$ the variance of the effect of playing solo is $\sigma_{\gamma}^2 = 22.23$. 
+
+## Problem 6
+
+Compare the models from the two previous problems using a likelihood ratio test. Which model is better?
+
+```{r}
+anova(model.b, model.c)
+```
+Including solo performance as a random slope significantly improves the model.
+
+## Problem 7
+Using the model chosen above, predict the happiness score for the first observation using just the fixed effects by (1) creating the model matrix, (2) obtaining the fixed effect coefficients using `fixedf` (3) multiplying them by the first row of the model matrix you created. Compare this result to the output of the `predict` fuction. Now create a new vector that is the same as the first row of music but with an id = 100. Make a prediction for this observation. Use `predictInterval` in the `merTools` package to get intervals for your two predictions. 
+
+```{r}
+x <- model.matrix(pa~years_study + audience + solo+id, music)
+beta <- fixef(model.c)
+x[1,names(beta)]%*%beta
+predict(model.c, newdata = music[1,], allow.new.levels = TRUE)
+
+new_musician <- music[1,] 
+new_musician$id <- 100
+predict(model.c, newdata = new_musician, allow.new.levels = TRUE)
+
+predictInterval(model.c, newdata = new_musician)
+predictInterval(model.c, newdata=music[1,])
+
+
+```

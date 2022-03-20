@@ -1,0 +1,281 @@
+---
+title: "Random Forest ang GLM comparison"
+output: html_notebook
+---
+
+```{r setup, include = FALSE}
+library(caret)
+library(h2o)
+library(yardstick)
+library(ROCR)
+library(PRROC)
+library(caret)
+library(tidyverse)
+library(kableExtra)
+```
+
+```{r load data}
+# data pull as of 08-20-2020 (from simple_drg_pred.R)
+# save(final_df, file = '~/bkt_inv_post_acute/glm_final_df.rds')
+#save(drg_mapping, file = '~/bkt_inv_post_acute/drg_mapping.rds')
+load('~/bkt_inv_post_acute/glm_final_df.rds')
+load('~/bkt_inv_post_acute/drg_mapping.rds')
+
+#change response to factor
+final_df$readmit_30_flag <- as.factor(final_df$readmit_30_flag)
+final_df$gender <- as.factor(final_df$gender)
+
+# use same train test split for comparison
+set.seed(1085)
+trainIndex <- createDataPartition(1:nrow(final_df), p=0.7, list = FALSE)
+
+train_df <- final_df[trainIndex,]
+test_df <- final_df[-trainIndex,]
+```
+
+Comparison of glm and random forest models for predicting readmissions 30 days after first discharge in 2018.
+
+## {.tabset}
+### glm 
+
+```{r}
+# fit glm
+glm_fit <- glm(
+  readmit_30_flag ~ . - savvy_pid,
+  data = train_df,
+  family = binomial(link = "logit")
+)
+
+#save(glm_fit, file = '~/bkt_inv_post_acute/glm_fit.rds')
+```
+
+#### important variables
+```{r}
+# get coefficient summary from model fitted in simple_drg_pred.R
+coef_smry <- summary(glm_fit)$coefficient
+
+# keep significant variables
+signif_vars <- rownames(coef_smry)[which(coef_smry[,4] < 0.05)][-1]
+
+# creating labels for plotting
+labels <- full_join(data.frame(drg_col_name = signif_vars),
+                    filter(drg_mapping, drg_col_name %in% signif_vars)) %>% 
+  mutate(drg_desc2 = ifelse(is.na(drg_desc), drg_col_name, drg_desc))
+
+# odds ratio
+coef_tab <- tibble(vars = labels$drg_desc2,
+                   odds = exp(coef_smry[which(rownames(coef_smry) %in% signif_vars),1]),
+                   low_ci = exp(coef_smry[signif_vars, 1] - (1.96*coef_smry[signif_vars, 2])),
+                   upper_ci = exp(coef_smry[signif_vars, 1] + (1.96*coef_smry[signif_vars, 2]))
+)
+
+# plot estimates with CI
+coef_tab %>%
+  filter(odds > 1) %>%
+ggplot(aes(x = reorder(vars, odds), y = odds)) +
+  geom_errorbar(aes(ymin = low_ci, ymax = upper_ci), col = '#4285f4')+
+  geom_point(col = 'grey35') +
+  geom_hline(yintercept = 1, col = '#fcaf03') +
+  coord_flip() + 
+  labs(x = 'Model Coefficient', y = "Odds Ratio") + 
+  theme_rnd(13)
+
+coef_tab %>%
+  filter(odds < 1) %>%
+ggplot(aes(x = reorder(vars, odds), y = odds)) +
+  geom_errorbar(aes(ymin = low_ci, ymax = upper_ci), col = '#4285f4')+
+  geom_point(col = 'grey35') +
+  geom_hline(yintercept = 1, col = '#fcaf03') +
+  coord_flip() + 
+  labs(x = 'Model Coefficient', y = "Odds Ratio") + 
+  theme_rnd(13)
+```
+
+
+```{r}
+## make predictions
+glm_train_probs <- predict(glm_fit, train_df, type = 'response')
+glm_test_probs <- predict(glm_fit, test_df, type = 'response')
+
+
+## distribution of prediction scores
+hist(glm_train_probs); abline(v = 0.5, col = 'red')
+
+```
+
+
+```{r}
+# get F1 Optimal Threshold to identify classes
+pr_vals <- pr_curve(
+  tibble(truth = factor(train_df$readmit_30_flag, levels = c(1,0)),
+         estimate = glm_train_probs), truth, estimate) %>% 
+  mutate(f1 = 2*precision*recall/(precision+recall))
+
+opt_treshold <- pr_vals[which.max(pr_vals$f1),  ".threshold"]
+
+# getting really imbalanced results with opt_threshold
+glm_train_classes <- ifelse(glm_train_probs > opt_treshold[[1]], 1, 0) %>% as.factor()
+glm_test_classes <- ifelse(glm_test_probs > opt_treshold[[1]], 1, 0) %>% as.factor()
+
+```
+
+#### Test Confusion Matrix
+```{r}
+# confusion matrix
+glm_cm <- confusionMatrix(glm_test_classes, test_df$readmit_30_flag,
+                mode = 'everything', positive =  '1')
+
+glm_cm
+```
+
+
+#### plotting 
+```{r}
+glm_roc <- roc.curve(scores.class0 = glm_test_probs[test_df$readmit_30_flag == 1],
+          scores.class1 = glm_test_probs[test_df$readmit_30_flag == 0],
+          curve = T)
+
+plot(glm_roc)
+
+glm_pr <- pr.curve(scores.class0 = glm_test_probs[test_df$readmit_30_flag == 1],
+          scores.class1 = glm_test_probs[test_df$readmit_30_flag == 0],
+          curve = T)
+
+plot(glm_pr)
+
+```
+
+### random forest
+```{r setup h2o}
+h2o.init()
+
+# defining predictors and response
+response <- "readmit_30_flag"
+predictors <- colnames(dplyr::select(test_df[-1], -readmit_30_flag))
+
+# convert to h2o objects 
+rf_train <- as.h2o(train_df[-1])
+rf_test <- as.h2o(test_df[-1])
+```
+
+
+```{r fit rf}
+## fitting random forest (initial fit)
+rf_fit <- h2o.randomForest(x = predictors,
+                           y = response,
+                           training_frame = rf_train,
+                           validation_frame = rf_test,
+                           ntrees = 500,
+                           min_rows = 5, 
+                           max_depth = floor(sqrt(NCOL(train_df)-1)),
+                           binomial_double_trees = TRUE,
+                           seed = 1085)
+
+#save(rf_fit, file = '~/bkt_inv_post_acute/rf_fit.rds')
+
+
+
+#variable importance
+h2o.varimp_plot(rf_fit, num_of_features = 10)
+
+# manually plotting variable importance with labels
+# renaming columns for plotting variable importance
+x <- inner_join(drg_mapping, 
+          data.frame(drg_col_name = names(final_df)))
+
+labs <- data.frame(variable = names(final_df)[-c(1,2)],
+           labels = c("age_group", "gender", "ip_days", x[[1]]))
+imp_data <- merge(as.data.frame(h2o.varimp(rf_fit)), labs) 
+imp_data$labels <- as.character(imp_data$labels)
+data =  imp_data %>%
+  arrange(desc(scaled_importance))
+
+data[1:20,] %>% 
+  ggplot(aes(x = reorder(labels, scaled_importance), y = scaled_importance)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Variable Importance Plot",
+       y = "",
+       x = "")
+```
+
+```{r, echo = TRUE}
+# make predictions 
+rf_train_pred <- as.data.frame(h2o.predict(rf_fit, rf_train))
+rf_test_pred <- as.data.frame(h2o.predict(rf_fit, rf_test))
+
+# predicted probabilities for a readmission (response = 1)
+rf_train_prob <- rf_train_pred$p1
+rf_test_prob <- rf_test_pred$p1
+
+# predicted classes, prediction threshold is based on max f1
+rf_train_classes <- as.factor(as.vector((rf_train_pred$predict)))
+rf_test_classes <- as.factor(as.vector((rf_test_pred$predict)))
+
+```
+
+
+#### Test confusion matrix
+```{r}
+rf_cm <- confusionMatrix(rf_test_classes, test_df$readmit_30_flag,
+                mode = 'everything', positive =  '1')
+
+rf_cm
+```
+
+#### plotting 
+```{r}
+rf_roc <- roc.curve(scores.class0 = rf_test_prob[test_df$readmit_30_flag == 1],
+          scores.class1 = rf_test_prob[test_df$readmit_30_flag == 0],
+          curve = T)
+
+plot(rf_roc)
+
+rf_pr <- pr.curve(scores.class0 = rf_test_prob[test_df$readmit_30_flag == 1],
+          scores.class1 = rf_test_prob[test_df$readmit_30_flag == 0],
+          curve = T)
+
+plot(rf_pr)
+
+```
+
+### model comparison
+
+```{r}
+#confusion matrix metrics
+glm_cm_met <- glm_cm$byClass
+rf_cm_met <- rf_cm$byClass
+
+glm_met <- as.data.frame(glm_cm_met)
+glm_met <- data.frame(metric = rownames(glm_met), glm_metric_value = glm_cm_met, row.names = NULL)
+
+rf_met <- as.data.frame(rf_cm_met)
+rf_met <- data.frame(metric = rownames(rf_met), rf_metric_value = rf_cm_met, row.names = NULL)
+
+# auc
+auc_met <- data.frame(metric = c("auc_roc", "auc_pr"), 
+                      glm_metric_value = c(glm_roc$auc, glm_pr$auc.integral),
+                      rf_metric_value = c(rf_roc$auc, rf_pr$auc.integral))
+
+options(scipen = 10)
+metric_tab <- merge(glm_met,rf_met) %>% full_join(auc_met) %>%  
+  arrange(desc(metric))
+
+kable(metric_tab)
+
+#visualize metrics 
+metric_tab %>% 
+  gather(key = 'mod_typ', value = 'metric_value', -metric) %>% 
+  ggplot(aes(y = metric_value, 
+             x = reorder(metric, desc(metric)),
+             fill = mod_typ)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  coord_flip() +
+  labs(fill = 'model type',
+       x = 'performance metric') +
+  scale_fill_discrete(labels = c('logisic regression', 'random forest'))
+
+```
+
+
+
